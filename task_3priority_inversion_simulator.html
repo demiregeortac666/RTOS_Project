@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Priority Inversion Simulator — CENG-435 Case Study 3</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@400;600;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #11161e;
+    --panel-2: #161c25;
+    --line: #1f2733;
+    --line-2: #2a3445;
+    --text: #d6dde8;
+    --text-dim: #7a8699;
+    --text-faint: #4d5666;
+    --accent: #e8b86a;
+    --running: #4cc2ff;
+    --ready: #5a6478;
+    --blocked: #ff6b6b;
+    --done: #5fd896;
+    --critical: #c084fc;
+    --task-h: #ff8a8a;
+    --task-m: #ffd166;
+    --task-l: #6cb4ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--text); font-family: 'Bricolage Grotesque', system-ui, sans-serif; min-height: 100vh; }
+  body { padding: 32px 40px 60px; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  header { border-bottom: 1px solid var(--line); padding-bottom: 18px; margin-bottom: 26px; display: flex; justify-content: space-between; align-items: end; flex-wrap: wrap; gap: 14px; }
+  h1 { font-size: 28px; font-weight: 800; letter-spacing: -0.02em; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--text-dim); font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.05em; text-transform: uppercase; margin-top: 4px; }
+  .mode-pill { font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 6px 12px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--text-dim); }
+  .mode-pill.problem { color: var(--blocked); border-color: var(--blocked); }
+  .mode-pill.solution { color: var(--done); border-color: var(--done); }
+
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 14px 18px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; margin-bottom: 18px; }
+  button { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 8px 14px; font-family: 'JetBrains Mono', monospace; font-size: 12px; cursor: pointer; transition: all 0.15s; letter-spacing: 0.04em; }
+  button:hover { background: var(--line); border-color: var(--accent); color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); font-weight: 700; }
+  button.primary:hover { background: #f5c97a; color: var(--bg); }
+  button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .control-group { display: flex; gap: 6px; align-items: center; padding-left: 14px; border-left: 1px solid var(--line-2); }
+  .control-group label { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); border-radius: 6px; padding: 7px 10px; font-family: 'JetBrains Mono', monospace; font-size: 12px; cursor: pointer; }
+  input[type=range] { accent-color: var(--accent); width: 110px; }
+
+  .status-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px; }
+  .status-card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 16px; }
+  .status-card .lbl { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 4px; }
+  .status-card .val { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 700; color: var(--text); }
+
+  .timeline-wrap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 20px; margin-bottom: 18px; overflow-x: auto; }
+  .tl-title { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; }
+  .timeline { display: grid; grid-template-columns: 130px 1fr; row-gap: 6px; column-gap: 12px; min-width: 900px; }
+  .row-label { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--text-dim); display: flex; align-items: center; height: 30px; }
+  .row-label .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+  .row-cells { display: flex; gap: 1px; height: 30px; }
+  .cell { flex: 1; min-width: 22px; height: 100%; background: transparent; border-radius: 2px; position: relative; transition: background 0.15s; }
+  .cell.s-NOT_ARRIVED { background: transparent; }
+  .cell.s-READY { background: var(--ready); opacity: 0.55; }
+  .cell.s-RUNNING { background: var(--running); }
+  .cell.s-RUNNING.task-H { background: var(--task-h); }
+  .cell.s-RUNNING.task-M { background: var(--task-m); }
+  .cell.s-RUNNING.task-L { background: var(--task-l); }
+  .cell.s-BLOCKED { background: var(--blocked); opacity: 0.85; }
+  .cell.s-DONE { background: var(--done); opacity: 0.4; }
+  .cell.holds-mutex::after { content: ''; position: absolute; inset: 4px; border: 2px solid var(--critical); border-radius: 3px; pointer-events: none; }
+  .cell:hover { outline: 1px solid var(--accent); outline-offset: 1px; z-index: 2; }
+  .axis-row { display: flex; gap: 1px; margin-top: 4px; }
+  .axis-tick { flex: 1; min-width: 22px; text-align: center; font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text-faint); }
+  .axis-tick.major { color: var(--text-dim); font-weight: 600; }
+
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; padding: 10px 16px; background: var(--panel-2); border-radius: 8px; margin-top: 16px; font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 14px; height: 14px; border-radius: 3px; }
+  .legend-swatch.crit { border: 2px solid var(--critical); background: transparent; }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 18px; }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 22px; }
+  .card h2 { font-size: 13px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 14px; font-weight: 500; }
+
+  .task-states { display: flex; flex-direction: column; gap: 10px; }
+  .task-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--panel-2); border-radius: 6px; border-left: 3px solid var(--line-2); }
+  .task-row.run { border-left-color: var(--running); }
+  .task-row.blk { border-left-color: var(--blocked); }
+  .task-row.don { border-left-color: var(--done); }
+  .task-row .name { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; }
+  .task-row .info { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-dim); display: flex; gap: 14px; }
+  .task-row .info span b { color: var(--accent); font-weight: 600; }
+  .badge { font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 3px 8px; border-radius: 4px; letter-spacing: 0.05em; }
+  .badge.RUNNING { background: var(--running); color: var(--bg); font-weight: 700; }
+  .badge.READY { background: var(--ready); color: var(--text); }
+  .badge.BLOCKED { background: var(--blocked); color: var(--bg); font-weight: 700; }
+  .badge.DONE { background: var(--done); color: var(--bg); }
+  .badge.NOT_ARRIVED { background: var(--line-2); color: var(--text-faint); }
+
+  .events { max-height: 300px; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .event { padding: 6px 10px; border-left: 2px solid var(--line-2); margin-bottom: 3px; color: var(--text-dim); display: flex; gap: 12px; }
+  .event .t { color: var(--accent); min-width: 40px; }
+  .event.crit { border-left-color: var(--critical); color: var(--text); background: rgba(192, 132, 252, 0.06); }
+  .event.warn { border-left-color: var(--blocked); color: var(--text); background: rgba(255, 107, 107, 0.06); }
+  .event.good { border-left-color: var(--done); color: var(--text); background: rgba(95, 216, 150, 0.06); }
+  .events::-webkit-scrollbar { width: 6px; }
+  .events::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
+
+  .theory { font-size: 14px; line-height: 1.65; color: var(--text); }
+  .theory p { margin-bottom: 10px; }
+  .theory code { font-family: 'JetBrains Mono', monospace; background: var(--panel-2); padding: 2px 6px; border-radius: 3px; color: var(--accent); font-size: 12px; }
+  .theory strong { color: var(--accent); }
+
+  .scenario-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+  .scenario-box { background: var(--panel-2); padding: 12px 14px; border-radius: 6px; font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .scenario-box h3 { font-size: 11px; color: var(--text-faint); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .scenario-box .row { display: flex; justify-content: space-between; padding: 3px 0; color: var(--text-dim); }
+  .scenario-box .row b { color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Priority Inversion <span>Simulator</span></h1>
+    <div class="subtitle">CENG-435 · Case Study 3 · Mutex / Priority Inheritance</div>
+  </div>
+  <div id="modePill" class="mode-pill problem">MODE: WITHOUT PRIORITY INHERITANCE</div>
+</header>
+
+<div class="controls">
+  <button id="btnPlay" class="primary">▶ Play</button>
+  <button id="btnPause">Pause</button>
+  <button id="btnStep">Step ▸</button>
+  <button id="btnReset">Reset</button>
+  <div class="control-group">
+    <label>Mode</label>
+    <select id="selMode">
+      <option value="problem">Without Priority Inheritance (Problem)</option>
+      <option value="solution">With Priority Inheritance (Fix)</option>
+    </select>
+  </div>
+  <div class="control-group">
+    <label>Speed</label>
+    <input type="range" id="spd" min="60" max="600" value="260" step="20">
+    <span id="spdLabel" class="mono" style="font-size:11px;color:var(--text-dim);min-width:60px;">260 ms</span>
+  </div>
+</div>
+
+<div class="status-row">
+  <div class="status-card"><div class="lbl">Tick</div><div class="val mono" id="vTime">0</div></div>
+  <div class="status-card"><div class="lbl">Running</div><div class="val mono" id="vRun">—</div></div>
+  <div class="status-card"><div class="lbl">Mutex Holder</div><div class="val mono" id="vMut">—</div></div>
+  <div class="status-card"><div class="lbl">Blocked</div><div class="val mono" id="vBlk">—</div></div>
+</div>
+
+<div class="timeline-wrap">
+  <div class="tl-title">Execution Timeline (Gantt)</div>
+  <div class="timeline" id="timeline"></div>
+  <div class="legend">
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--task-h)"></div>Task H Running</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--task-m)"></div>Task M Running</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--task-l)"></div>Task L Running</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--ready);opacity:0.55"></div>Ready</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--blocked)"></div>Blocked</div>
+    <div class="legend-item"><div class="legend-swatch" style="background:var(--done);opacity:0.4"></div>Done</div>
+    <div class="legend-item"><div class="legend-swatch crit"></div>Holds Mutex</div>
+  </div>
+</div>
+
+<div class="grid-2">
+  <div class="card">
+    <h2>Task States</h2>
+    <div class="task-states" id="taskStates"></div>
+  </div>
+  <div class="card">
+    <h2>Event Log</h2>
+    <div class="events" id="events"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>OS Theory · Why this matters</h2>
+  <div class="theory" id="theoryBox">
+    <p><strong>Priority Inversion</strong> occurs when a high-priority task is indirectly blocked by a lower-priority task because of shared mutex contention. The classical 3-task scenario:</p>
+    <p>Task <code>L</code> (low) holds a mutex. Task <code>H</code> (high) wakes up and requests the same mutex, so it goes <code>BLOCKED</code>. So far this is correct. The bug appears when Task <code>M</code> (medium, doesn't need the mutex) becomes ready: <code>M</code> preempts <code>L</code> (because M > L by priority). Now <code>H</code> is effectively waiting for <code>M</code> to finish — even though H has higher priority than M. The priority order is inverted.</p>
+    <p><strong>Mars Pathfinder (1997)</strong> hit exactly this bug. The high-priority bus management thread blocked on a mutex held by a low-priority meteorological task. Medium-priority communications work kept preempting the meteorological task. The bus thread's watchdog timer eventually expired and the system rebooted itself repeatedly. JPL fixed it by enabling <code>Priority Inheritance</code> on the VxWorks mutex (the flag was already there — they just had it disabled).</p>
+    <p><strong>Priority Inheritance Protocol:</strong> when a higher-priority task blocks on a mutex, the current holder <em>temporarily inherits</em> the blocker's priority. This way, no medium-priority task can preempt the holder during its critical section. Once the mutex is released, the original priority is restored.</p>
+    <div class="scenario-summary">
+      <div class="scenario-box">
+        <h3>Without Inheritance</h3>
+        <div class="row"><span>L finishes critical section at</span><b id="probLEnd">—</b></div>
+        <div class="row"><span>H finishes at</span><b id="probHEnd">—</b></div>
+        <div class="row"><span>H blocked for</span><b id="probHBlk">—</b> ticks</div>
+      </div>
+      <div class="scenario-box">
+        <h3>With Inheritance</h3>
+        <div class="row"><span>L finishes critical section at</span><b id="solLEnd">—</b></div>
+        <div class="row"><span>H finishes at</span><b id="solHEnd">—</b></div>
+        <div class="row"><span>H blocked for</span><b id="solHBlk">—</b> ticks</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===========================================================================
+// PRIORITY INVERSION SIMULATOR
+// Discrete-tick scheduler with three tasks and one shared mutex.
+// ===========================================================================
+
+const TICKS = 22; // total simulation length
+
+// Each task is defined by an arrival time and a script of actions.
+// Action kinds: 'WORK', 'ACQUIRE', 'RELEASE'
+function buildTasks() {
+  return [
+    { id: 'H', name: 'Task H (high)', basePriority: 3, arrival: 4,
+      actions: ['ACQUIRE','WORK','WORK','RELEASE'] },
+    { id: 'M', name: 'Task M (med)',  basePriority: 2, arrival: 5,
+      actions: ['WORK','WORK','WORK','WORK'] },
+    { id: 'L', name: 'Task L (low)',  basePriority: 1, arrival: 0,
+      actions: ['WORK','ACQUIRE','WORK','WORK','WORK','WORK','RELEASE','WORK'] }
+  ].map(t => ({ ...t, priority: t.basePriority, actionIndex: 0, state: 'NOT_ARRIVED' }));
+}
+
+class Simulation {
+  constructor(usePriorityInheritance) {
+    this.tasks = buildTasks();
+    this.mutex = { holder: null, waitQueue: [] };
+    this.time = 0;
+    this.priorityInheritance = usePriorityInheritance;
+    this.history = []; // per-tick snapshots
+    this.events = [];
+    // Pre-record state at t=0 (before any execution)
+    this._snapshot(null, null);
+  }
+
+  _log(msg, kind='info') {
+    this.events.push({ time: this.time, msg, kind });
+  }
+
+  _snapshot(runner, action) {
+    this.history.push({
+      time: this.time,
+      runnerId: runner ? runner.id : null,
+      action: action,
+      mutexHolderId: this.mutex.holder ? this.mutex.holder.id : null,
+      tasks: this.tasks.map(t => ({ id: t.id, state: t.state, priority: t.priority, actionIndex: t.actionIndex }))
+    });
+  }
+
+  _arrivals() {
+    for (const t of this.tasks) {
+      if (t.state === 'NOT_ARRIVED' && t.arrival <= this.time) {
+        t.state = 'READY';
+        this._log(`${t.name} arrives, becomes READY (priority ${t.priority})`);
+      }
+    }
+  }
+
+  _pickRunner() {
+    const cands = this.tasks.filter(t => t.state === 'READY' || t.state === 'RUNNING');
+    if (cands.length === 0) return null;
+    cands.sort((a,b) => b.priority - a.priority);
+    return cands[0];
+  }
+
+  step() {
+    if (this.time >= TICKS) return false;
+
+    this._arrivals();
+
+    // Schedule loop: keep picking until someone runs a real action or all are blocked
+    let runner = null;
+    let executed = null;
+    let safety = 6;
+
+    while (safety-- > 0) {
+      runner = this._pickRunner();
+      if (!runner) break;
+
+      // Mark runner RUNNING, others not blocked become READY
+      for (const t of this.tasks) {
+        if (t.state === 'RUNNING' && t !== runner) t.state = 'READY';
+      }
+      runner.state = 'RUNNING';
+
+      const act = runner.actions[runner.actionIndex];
+      if (!act) {
+        runner.state = 'DONE';
+        this._log(`${runner.name} finishes`, 'good');
+        runner = null;
+        continue;
+      }
+
+      if (act === 'WORK') {
+        runner.actionIndex++;
+        executed = 'WORK';
+        if (runner.actionIndex >= runner.actions.length) {
+          runner.state = 'DONE';
+          this._log(`${runner.name} finishes`, 'good');
+        }
+        break;
+      }
+
+      if (act === 'ACQUIRE') {
+        if (this.mutex.holder === null) {
+          this.mutex.holder = runner;
+          runner.actionIndex++;
+          this._log(`${runner.name} ACQUIRES mutex`, 'crit');
+          executed = 'ACQUIRE';
+          if (runner.actionIndex >= runner.actions.length) {
+            runner.state = 'DONE';
+          }
+          break;
+        } else {
+          // Block
+          runner.state = 'BLOCKED';
+          if (!this.mutex.waitQueue.includes(runner)) this.mutex.waitQueue.push(runner);
+          this._log(`${runner.name} requests mutex → BLOCKED (held by ${this.mutex.holder.name})`, 'warn');
+
+          if (this.priorityInheritance) {
+            if (runner.priority > this.mutex.holder.priority) {
+              const oldP = this.mutex.holder.priority;
+              this.mutex.holder.priority = runner.priority;
+              this._log(`Priority inheritance: ${this.mutex.holder.name} priority ${oldP} → ${runner.priority}`, 'good');
+            }
+          }
+          // Loop again to find another runner
+          continue;
+        }
+      }
+
+      if (act === 'RELEASE') {
+        const wasHolder = this.mutex.holder === runner;
+        this.mutex.holder = null;
+        runner.actionIndex++;
+        this._log(`${runner.name} RELEASES mutex`, 'crit');
+        executed = 'RELEASE';
+
+        if (this.priorityInheritance && runner.priority !== runner.basePriority) {
+          this._log(`Priority restored: ${runner.name} ${runner.priority} → ${runner.basePriority}`, 'good');
+          runner.priority = runner.basePriority;
+        }
+        // Wake all waiters
+        for (const w of this.mutex.waitQueue) {
+          w.state = 'READY';
+          this._log(`${w.name} unblocked`, 'good');
+        }
+        this.mutex.waitQueue = [];
+
+        if (runner.actionIndex >= runner.actions.length) {
+          runner.state = 'DONE';
+          this._log(`${runner.name} finishes`, 'good');
+        }
+        break;
+      }
+    }
+
+    // Demote any RUNNING task that didn't actually run this tick (everyone blocked)
+    if (!runner) {
+      for (const t of this.tasks) {
+        if (t.state === 'RUNNING') t.state = 'READY';
+      }
+    }
+
+    this._snapshot(runner, executed);
+    this.time++;
+    return true;
+  }
+
+  runToEnd() { while (this.step()) {} }
+
+  // Compute summary stats from history
+  stats() {
+    const blockedTicks = {};
+    let lEnd = null, hEnd = null;
+    for (const snap of this.history) {
+      for (const t of snap.tasks) {
+        if (t.state === 'BLOCKED') blockedTicks[t.id] = (blockedTicks[t.id] || 0) + 1;
+      }
+      const L = snap.tasks.find(x => x.id === 'L');
+      const H = snap.tasks.find(x => x.id === 'H');
+      if (L && L.state === 'DONE' && lEnd === null) lEnd = snap.time;
+      if (H && H.state === 'DONE' && hEnd === null) hEnd = snap.time;
+    }
+    return { blockedTicks, lEnd, hEnd };
+  }
+}
+
+// ===========================================================================
+// UI / Rendering
+// ===========================================================================
+
+const $ = id => document.getElementById(id);
+let sim = new Simulation(false);
+let timer = null;
+
+function renderTimeline() {
+  const tl = $('timeline');
+  tl.innerHTML = '';
+  const rows = [
+    { id: 'H', label: 'Task H (high)', dot: 'var(--task-h)' },
+    { id: 'M', label: 'Task M (med)',  dot: 'var(--task-m)' },
+    { id: 'L', label: 'Task L (low)',  dot: 'var(--task-l)' },
+  ];
+
+  for (const r of rows) {
+    const lbl = document.createElement('div');
+    lbl.className = 'row-label';
+    lbl.innerHTML = `<span class="dot" style="background:${r.dot}"></span>${r.label}`;
+    tl.appendChild(lbl);
+
+    const cells = document.createElement('div');
+    cells.className = 'row-cells';
+    for (let t = 0; t < TICKS; t++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell s-NOT_ARRIVED';
+      cell.dataset.tid = r.id;
+      cell.dataset.t = t;
+      cells.appendChild(cell);
+    }
+    tl.appendChild(cells);
+  }
+
+  // Axis row
+  const axisLabel = document.createElement('div');
+  axisLabel.className = 'row-label';
+  axisLabel.style.color = 'var(--text-faint)';
+  axisLabel.style.fontSize = '10px';
+  axisLabel.textContent = 'tick';
+  tl.appendChild(axisLabel);
+
+  const axis = document.createElement('div');
+  axis.className = 'axis-row';
+  for (let t = 0; t < TICKS; t++) {
+    const tick = document.createElement('div');
+    tick.className = 'axis-tick' + (t % 5 === 0 ? ' major' : '');
+    tick.textContent = t;
+    axis.appendChild(tick);
+  }
+  tl.appendChild(axis);
+}
+
+function paintTimeline() {
+  // Iterate through history snapshots and paint cells
+  for (let i = 1; i < sim.history.length; i++) {
+    // history[i] is the state AFTER tick (i-1) executed, recorded at time=(i-1)
+    const snap = sim.history[i];
+    const tickIndex = snap.time; // The tick that just executed
+    for (const tt of snap.tasks) {
+      const cell = document.querySelector(`.cell[data-tid="${tt.id}"][data-t="${tickIndex}"]`);
+      if (!cell) continue;
+      cell.className = `cell s-${tt.state} task-${tt.id}`;
+      if (snap.mutexHolderId === tt.id) cell.classList.add('holds-mutex');
+      const actLabel = (snap.runnerId === tt.id && snap.action) ? `: ${snap.action}` : '';
+      cell.title = `${tt.id} @ t=${tickIndex} → ${tt.state} (prio=${tt.priority})${actLabel}`;
+    }
+  }
+}
+
+function renderTaskStates() {
+  const box = $('taskStates');
+  box.innerHTML = '';
+  for (const t of sim.tasks) {
+    const row = document.createElement('div');
+    let cls = '';
+    if (t.state === 'RUNNING') cls = 'run';
+    else if (t.state === 'BLOCKED') cls = 'blk';
+    else if (t.state === 'DONE') cls = 'don';
+    row.className = `task-row ${cls}`;
+    const inheritedMark = (t.priority !== t.basePriority) ? `<span style="color:var(--critical)">↑${t.priority}</span>` : `${t.priority}`;
+    const holding = sim.mutex.holder && sim.mutex.holder.id === t.id ? ' [holds mutex]' : '';
+    row.innerHTML = `
+      <div class="name">${t.id} <span style="color:var(--text-faint);font-weight:400">${t.name.replace(t.id+' ','')}</span></div>
+      <div class="info">
+        <span>prio: <b>${inheritedMark}</b></span>
+        <span>step: <b>${t.actionIndex}/${t.actions.length}</b></span>
+        <span class="badge ${t.state}">${t.state}${holding}</span>
+      </div>
+    `;
+    box.appendChild(row);
+  }
+}
+
+function renderEvents() {
+  const box = $('events');
+  box.innerHTML = '';
+  for (const e of sim.events) {
+    const div = document.createElement('div');
+    div.className = `event ${e.kind}`;
+    div.innerHTML = `<span class="t">t=${e.time}</span><span>${e.msg}</span>`;
+    box.appendChild(div);
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function renderStatus() {
+  $('vTime').textContent = sim.time;
+  const running = sim.tasks.find(t => t.state === 'RUNNING');
+  $('vRun').textContent = running ? running.id : 'idle';
+  $('vRun').style.color = running ? `var(--task-${running.id.toLowerCase()})` : 'var(--text-faint)';
+  $('vMut').textContent = sim.mutex.holder ? sim.mutex.holder.id : '—';
+  $('vMut').style.color = sim.mutex.holder ? 'var(--critical)' : 'var(--text-faint)';
+  const blocked = sim.tasks.filter(t => t.state === 'BLOCKED').map(t => t.id).join(', ');
+  $('vBlk').textContent = blocked || '—';
+  $('vBlk').style.color = blocked ? 'var(--blocked)' : 'var(--text-faint)';
+}
+
+function renderAll() {
+  paintTimeline();
+  renderTaskStates();
+  renderEvents();
+  renderStatus();
+}
+
+function reset(mode) {
+  if (timer) { clearInterval(timer); timer = null; }
+  sim = new Simulation(mode === 'solution');
+  // pill
+  const pill = $('modePill');
+  if (mode === 'solution') {
+    pill.className = 'mode-pill solution';
+    pill.textContent = 'MODE: WITH PRIORITY INHERITANCE';
+  } else {
+    pill.className = 'mode-pill problem';
+    pill.textContent = 'MODE: WITHOUT PRIORITY INHERITANCE';
+  }
+  renderTimeline();
+  renderAll();
+  $('btnPlay').disabled = false;
+}
+
+function play() {
+  if (timer) return;
+  if (sim.time >= TICKS) return;
+  $('btnPlay').disabled = true;
+  const speed = parseInt($('spd').value, 10);
+  timer = setInterval(() => {
+    if (!sim.step()) {
+      clearInterval(timer); timer = null; $('btnPlay').disabled = false;
+      computeAndDisplayBothScenarios();
+      return;
+    }
+    renderAll();
+  }, speed);
+}
+
+function pause() {
+  if (timer) { clearInterval(timer); timer = null; $('btnPlay').disabled = false; }
+}
+
+function step() {
+  pause();
+  if (sim.step()) renderAll();
+}
+
+// Run both scenarios in background to compute summary numbers
+function computeAndDisplayBothScenarios() {
+  const a = new Simulation(false); a.runToEnd();
+  const b = new Simulation(true);  b.runToEnd();
+  const sa = a.stats(), sb = b.stats();
+  $('probLEnd').textContent = sa.lEnd ?? '—';
+  $('probHEnd').textContent = sa.hEnd ?? '—';
+  $('probHBlk').textContent = sa.blockedTicks.H ?? 0;
+  $('solLEnd').textContent = sb.lEnd ?? '—';
+  $('solHEnd').textContent = sb.hEnd ?? '—';
+  $('solHBlk').textContent = sb.blockedTicks.H ?? 0;
+}
+
+// Wire up controls
+$('btnPlay').onclick = play;
+$('btnPause').onclick = pause;
+$('btnStep').onclick = step;
+$('btnReset').onclick = () => reset($('selMode').value);
+$('selMode').onchange = e => reset(e.target.value);
+$('spd').oninput = e => {
+  $('spdLabel').textContent = e.target.value + ' ms';
+  if (timer) { pause(); play(); }
+};
+
+// Init
+reset('problem');
+computeAndDisplayBothScenarios();
+</script>
+</body>
+</html>
