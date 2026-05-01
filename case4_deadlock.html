@@ -1,0 +1,740 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deadlock Simulator — CENG-435 Case 4</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            margin: 0; padding: 20px; background-color: #f4f7f6;
+            display: grid; grid-template-columns: 420px 1fr; gap: 20px;
+        }
+        .panel { background: #fff; padding: 15px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { color: #2c3e50; font-size: 1.1rem; margin-top: 0; margin-bottom: 12px; }
+        h3 { color: #2c3e50; font-size: 0.95rem; margin: 0 0 8px 0; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+        th, td { padding: 5px; text-align: left; border-bottom: 1px solid #eee; }
+        input[type="number"], select { width: 100%; padding: 4px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="checkbox"] { transform: scale(1.2); cursor: pointer; }
+        .controls-row { display: flex; gap: 10px; margin-bottom: 15px; background: #f8f9fa; padding: 10px; border-radius: 4px; }
+        label { font-size: 0.8rem; color: #555; display: block; margin-bottom: 3px; }
+
+        .btn { display: block; width: 100%; padding: 10px; background-color: #27ae60; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; transition: background 0.2s; font-size: 0.9rem; }
+        .btn:hover:not(:disabled) { background-color: #2ecc71; }
+        .btn:disabled { background-color: #95a5a6; cursor: not-allowed; opacity: 0.7; }
+        .btn-secondary { background-color: #34495e; }
+        .btn-secondary:hover:not(:disabled) { background-color: #2c3e50; }
+
+        .canvas-container { width: 100%; height: 600px; overflow-x: auto; background: #fff; border: 1px solid #ddd; border-radius: 4px; }
+        canvas { display: block; }
+        .util-box { margin-top: 10px; padding: 10px; background: #e8f4fd; border-radius: 4px; font-weight: bold; font-size: 0.9rem; color: #2980b9; }
+        .alarm-box { margin-top: 10px; padding: 10px; background: #ffe4e4; border-radius: 4px; font-weight: bold; font-size: 0.9rem; color: #c0392b; border: 1px solid #f5b7b1; display: none; }
+        .alarm-box.show { display: block; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
+        .compare-box { margin-top: 10px; padding: 10px; background: #fdf3e8; border-radius: 4px; font-size: 0.85rem; color: #8b5a00; border: 1px solid #f5d8a4; }
+        .compare-box .row { display: flex; justify-content: space-between; padding: 2px 0; }
+        .compare-box .row b { color: #2c3e50; }
+        .error-box { margin-top: 10px; padding: 10px; background: #ffcccc; border: 1px solid #ff0000; border-radius: 4px; font-weight: bold; font-size: 0.9rem; color: #990000; display: none; }
+
+        .task-a { color: #d35400; font-weight: bold; }
+        .task-b { color: #2874a6; font-weight: bold; }
+        .dimmed-row { opacity: 0.4; transition: opacity 0.2s; }
+
+        .mode-pill { display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: bold; margin-left: 8px; }
+        .mode-pill.problem { background: #ffe4e4; color: #c0392b; border: 1px solid #f5b7b1; }
+        .mode-pill.solution { background: #e4f5e4; color: #1e8449; border: 1px solid #a9dfbf; }
+
+        .legend { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px; background: #f8f9fa; border-radius: 4px; margin-top: 10px; font-size: 0.75rem; }
+        .legend-item { display: flex; align-items: center; gap: 5px; }
+        .legend-swatch { width: 14px; height: 14px; border-radius: 2px; border: 1px solid #ccc; }
+        .legend-swatch.blk { background: repeating-linear-gradient(45deg, #c0392b, #c0392b 3px, #fadbd8 3px, #fadbd8 6px); }
+        .legend-swatch.dl { background: repeating-linear-gradient(45deg, #c0392b, #c0392b 4px, #000 4px, #000 8px); }
+        .legend-swatch.bo { background: #f5cba7; border: 1px dashed #d35400; }
+    </style>
+</head>
+<body>
+
+    <div class="panel">
+        <h2>Deadlock · Case 4</h2>
+
+        <div class="controls-row">
+            <div style="flex: 1;">
+                <label>Mode:</label>
+                <select id="modeSelect" onchange="syncAndRun()">
+                    <option value="problem">No Recovery (Problem)</option>
+                    <option value="solution">Mutex Timeout (Fix)</option>
+                </select>
+            </div>
+            <div style="flex: 0.6;">
+                <label>Timeout:</label>
+                <input type="number" id="timeoutInput" value="4" min="1" max="20" onchange="syncAndRun()">
+            </div>
+        </div>
+
+        <h3>Tasks <span id="modePill" class="mode-pill problem">PROBLEM</span></h3>
+        <table id="taskTable">
+            <thead>
+                <tr>
+                    <th>✓</th><th>Task</th><th>Arrival</th><th>1st Mutex</th><th>2nd Mutex</th><th>CS Work</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+        <div style="font-size: 0.7rem; color: #888; margin-top: 6px; line-height: 1.4;">
+            <b>1st / 2nd Mutex</b> = order each task acquires resources · Set both tasks to the same order to prevent deadlock by lock ordering.
+        </div>
+
+        <div class="controls-row" style="margin-top: 12px;">
+            <div style="flex: 1;">
+                <label>Scheduler Quantum:</label>
+                <input type="number" id="quantumInput" value="2" min="1" max="10" onchange="syncAndRun()">
+            </div>
+        </div>
+
+        <button class="btn" id="runBtn" onclick="syncAndRun()">Run Simulation</button>
+        <button class="btn btn-secondary" onclick="resetDefaults()" style="margin-top: 8px;">Reset to Defaults</button>
+
+        <div id="utilizationInfo" class="util-box">Total simulation length: 25 ticks · Round-robin scheduler</div>
+        <div id="alarmBox" class="alarm-box">⚠ DEADLOCK DETECTED</div>
+
+        <div class="compare-box">
+            <h3 style="margin: 0 0 6px 0; font-size: 0.85rem;">Both Scenarios Compared</h3>
+            <div class="row"><span>No Recovery · A finishes at:</span><b id="probAEnd">—</b></div>
+            <div class="row"><span>No Recovery · B finishes at:</span><b id="probBEnd">—</b></div>
+            <div class="row"><span>No Recovery · Deadlock at:</span><b id="probDL">—</b></div>
+            <div class="row"><span>With Timeout · A finishes at:</span><b id="solAEnd">—</b></div>
+            <div class="row"><span>With Timeout · B finishes at:</span><b id="solBEnd">—</b></div>
+            <div class="row"><span>With Timeout · # of timeouts:</span><b id="solTOs">—</b></div>
+        </div>
+
+        <div id="errorBox" class="error-box"></div>
+
+        <div style="margin-top: 15px;">
+            <label style="font-size: 0.85rem; font-weight: bold;">Time Axis Zoom:</label>
+            <input type="range" id="zoomLevel" min="1" max="4" value="1" step="0.5" oninput="redraw()" style="width: 100%;">
+        </div>
+
+        <div class="legend">
+            <div class="legend-item"><div class="legend-swatch" style="background:#d35400"></div>A run</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#2874a6"></div>B run</div>
+            <div class="legend-item"><div class="legend-swatch blk"></div>Blocked</div>
+            <div class="legend-item"><div class="legend-swatch dl"></div>Deadlocked</div>
+            <div class="legend-item"><div class="legend-swatch bo"></div>Backoff</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#8e44ad"></div>M_Sensor held</div>
+            <div class="legend-item"><div class="legend-swatch" style="background:#16a085"></div>M_Disk held</div>
+        </div>
+    </div>
+
+    <div class="panel" style="padding: 0; min-width: 0;">
+        <div class="canvas-container" id="canvasWrapper">
+            <canvas id="timelineCanvas" height="580"></canvas>
+        </div>
+    </div>
+
+    <script>
+        window.onerror = function(msg, url, lineNo) {
+            const errBox = document.getElementById('errorBox');
+            if (errBox) {
+                errBox.style.display = 'block';
+                errBox.innerHTML = `Error: ${msg}<br>Line: ${lineNo}`;
+            }
+            return false;
+        };
+
+        const TICKS = 25;
+        const BACKOFF = 1;
+
+        const defaultTasks = [
+            { id: 'A', name: 'Task A', arrival: 0, first: 'S', second: 'D', csWork: 1, color: '#d35400', enabled: true },
+            { id: 'B', name: 'Task B', arrival: 0, first: 'D', second: 'S', csWork: 1, color: '#2874a6', enabled: true },
+        ];
+        let tasks = JSON.parse(JSON.stringify(defaultTasks));
+
+        let canvas, ctx, wrapper;
+        let lastResult = { history: [], events: [], stats: {} };
+
+        function init() {
+            canvas = document.getElementById('timelineCanvas');
+            ctx = canvas.getContext('2d');
+            wrapper = document.getElementById('canvasWrapper');
+            renderTaskTable();
+            syncAndRun();
+        }
+
+        function renderTaskTable() {
+            const tbody = document.querySelector('#taskTable tbody');
+            tbody.innerHTML = '';
+            tasks.forEach(t => {
+                const tr = document.createElement('tr');
+                tr.id = `row_${t.id}`;
+                tr.innerHTML = `
+                    <td><input type="checkbox" id="en_${t.id}" ${t.enabled ? 'checked' : ''} onchange="syncAndRun()"></td>
+                    <td class="task-${t.id.toLowerCase()}">${t.id}</td>
+                    <td><input type="number" id="arr_${t.id}" value="${t.arrival}" min="0" max="20" onchange="syncAndRun()"></td>
+                    <td>
+                        <select id="first_${t.id}" onchange="syncAndRun()" style="font-size: 0.8rem;">
+                            <option value="S" ${t.first==='S'?'selected':''}>M_Sensor</option>
+                            <option value="D" ${t.first==='D'?'selected':''}>M_Disk</option>
+                        </select>
+                    </td>
+                    <td>
+                        <select id="second_${t.id}" onchange="syncAndRun()" style="font-size: 0.8rem;">
+                            <option value="S" ${t.second==='S'?'selected':''}>M_Sensor</option>
+                            <option value="D" ${t.second==='D'?'selected':''}>M_Disk</option>
+                        </select>
+                    </td>
+                    <td><input type="number" id="csw_${t.id}" value="${t.csWork}" min="0" max="10" onchange="syncAndRun()"></td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function resetDefaults() {
+            tasks = JSON.parse(JSON.stringify(defaultTasks));
+            renderTaskTable();
+            document.getElementById('modeSelect').value = 'problem';
+            document.getElementById('timeoutInput').value = 4;
+            document.getElementById('quantumInput').value = 2;
+            syncAndRun();
+        }
+
+        function syncTaskInputs() {
+            tasks.forEach(t => {
+                t.enabled = document.getElementById(`en_${t.id}`).checked;
+                t.arrival = parseInt(document.getElementById(`arr_${t.id}`).value) || 0;
+                t.first = document.getElementById(`first_${t.id}`).value;
+                t.second = document.getElementById(`second_${t.id}`).value;
+                t.csWork = parseInt(document.getElementById(`csw_${t.id}`).value) || 0;
+                document.getElementById(`row_${t.id}`).className = t.enabled ? '' : 'dimmed-row';
+            });
+        }
+
+        // Build action script: WORK, ACQUIRE first, WORK, ACQUIRE second, WORK*csWork, RELEASE second, RELEASE first
+        function buildActions(t) {
+            const acts = [];
+            acts.push({ type: 'WORK' });
+            acts.push({ type: 'ACQUIRE', mutex: t.first });
+            acts.push({ type: 'WORK' });
+            acts.push({ type: 'ACQUIRE', mutex: t.second });
+            for (let i = 0; i < t.csWork; i++) acts.push({ type: 'WORK' });
+            acts.push({ type: 'RELEASE', mutex: t.second });
+            acts.push({ type: 'RELEASE', mutex: t.first });
+            return acts;
+        }
+
+        // ===========================================================================
+        // SIMULATION CORE — round robin with quantum
+        // ===========================================================================
+        function simulate(useTimeout, timeoutThreshold) {
+            const rt = tasks.filter(t => t.enabled).map(t => ({
+                id: t.id, name: t.name, color: t.color,
+                arrival: t.arrival,
+                actions: buildActions(t),
+                actionIndex: 0,
+                state: 'NOT_ARRIVED',
+                holds: [],
+                blockedSince: null,
+                backoffUntil: null,
+                firstAcquireIndex: 1, // index of first ACQUIRE in actions (rollback target)
+            }));
+
+            const mutexes = { S: { holder: null, waitQueue: [] }, D: { holder: null, waitQueue: [] } };
+            const events = [];
+            const history = [];
+            let runningId = null;
+            let lastSwitch = 0;
+            let timeoutCount = 0;
+            let deadlockReportedAt = null;
+            let deadlockTicks = 0;
+            const quantum = parseInt(document.getElementById('quantumInput').value) || 2;
+
+            const checkDeadlock = (time) => {
+                const blocked = rt.filter(x => x.state === 'BLOCKED');
+                const allBlocked = blocked.length === rt.filter(x => x.state !== 'DONE' && x.state !== 'NOT_ARRIVED').length;
+                return blocked.length >= 2 && allBlocked;
+            };
+
+            for (let t = 0; t < TICKS; t++) {
+                // Arrivals
+                for (const x of rt) {
+                    if (x.state === 'NOT_ARRIVED' && x.arrival <= t) {
+                        x.state = 'READY';
+                        events.push({ time: t, msg: `${x.id} arrives`, kind: 'info' });
+                    }
+                }
+                // End of backoff
+                for (const x of rt) {
+                    if (x.state === 'BACKOFF' && t >= x.backoffUntil) {
+                        x.state = 'READY';
+                        x.backoffUntil = null;
+                        events.push({ time: t, msg: `${x.id} backoff ends, retry critical section`, kind: 'good' });
+                    }
+                }
+
+                // Timeout fire (at start of tick)
+                let snapAction = null;
+                if (useTimeout) {
+                    let firedAny = false;
+                    for (const x of rt) {
+                        if (x.state === 'BLOCKED' && x.blockedSince !== null && (t - x.blockedSince) >= timeoutThreshold) {
+                            // Rollback
+                            const failedAct = x.actions[x.actionIndex];
+                            events.push({ time: t, msg: `${x.id}: TIMEOUT on M_${failedAct.mutex} (${timeoutThreshold} ticks) → ROLLBACK`, kind: 'alarm' });
+                            timeoutCount++;
+                            firedAny = true;
+                            for (const m of [...x.holds]) {
+                                mutexes[m].holder = null;
+                                events.push({ time: t, msg: `${x.id} forcibly releases M_${m}`, kind: 'good' });
+                                for (const w of mutexes[m].waitQueue) {
+                                    if (w.state === 'BLOCKED') {
+                                        w.state = 'READY';
+                                        w.blockedSince = null;
+                                        events.push({ time: t, msg: `${w.id} unblocks (M_${m} freed)`, kind: 'good' });
+                                    }
+                                }
+                                mutexes[m].waitQueue = [];
+                            }
+                            x.holds = [];
+                            for (const m of Object.values(mutexes)) m.waitQueue = m.waitQueue.filter(w => w !== x);
+                            x.actionIndex = x.firstAcquireIndex;
+                            x.state = 'BACKOFF';
+                            x.backoffUntil = t + BACKOFF;
+                            x.blockedSince = null;
+                            snapAction = 'TIMEOUT';
+                        }
+                    }
+                    if (firedAny) {
+                        // This tick was consumed by rollback; snapshot and continue
+                        const snap = { time: t, runnerId: null, action: snapAction,
+                                       mutexS: mutexes.S.holder ? mutexes.S.holder.id : null,
+                                       mutexD: mutexes.D.holder ? mutexes.D.holder.id : null,
+                                       deadlocked: false,
+                                       states: {}, holds: {} };
+                        for (const x of rt) { snap.states[x.id] = x.state; snap.holds[x.id] = [...x.holds]; }
+                        history.push(snap);
+                        continue;
+                    }
+                }
+
+                // Schedule with round-robin + quantum
+                let runner = null;
+                let runnerForSnap = null;
+                let executed = null;
+
+                // Was previous runner pre-empted by quantum?
+                let prevRunner = runningId ? rt.find(x => x.id === runningId) : null;
+                if (prevRunner && prevRunner.state === 'RUNNING' && (t - lastSwitch) >= quantum) {
+                    prevRunner.state = 'READY';
+                    runningId = null;
+                }
+
+                // Pick a runner: prefer task different from current runningId for fairness
+                const ready = rt.filter(x => x.state === 'READY');
+                if (ready.length > 0) {
+                    let pick = ready.find(x => x.id !== runningId) || ready[0];
+                    // Demote any RUNNING that isn't pick
+                    for (const x of rt) if (x.state === 'RUNNING' && x !== pick) x.state = 'READY';
+                    pick.state = 'RUNNING';
+                    if (runningId !== pick.id) lastSwitch = t;
+                    runningId = pick.id;
+                    runner = pick;
+                } else {
+                    // Maybe still RUNNING from last tick continues
+                    runner = rt.find(x => x.state === 'RUNNING') || null;
+                    if (runner) runningId = runner.id;
+                }
+
+                if (runner) {
+                    const act = runner.actions[runner.actionIndex];
+                    if (!act) {
+                        runner.state = 'DONE';
+                        events.push({ time: t, msg: `${runner.id} finishes`, kind: 'good' });
+                        runningId = null;
+                        runnerForSnap = runner;
+                    } else if (act.type === 'WORK') {
+                        runner.actionIndex++;
+                        runnerForSnap = runner;
+                        executed = 'work';
+                        if (runner.actionIndex >= runner.actions.length) {
+                            runner.state = 'DONE';
+                            events.push({ time: t, msg: `${runner.id} finishes`, kind: 'good' });
+                            runningId = null;
+                        }
+                    } else if (act.type === 'ACQUIRE') {
+                        const mtx = mutexes[act.mutex];
+                        if (mtx.holder === null) {
+                            mtx.holder = runner;
+                            runner.holds.push(act.mutex);
+                            runner.actionIndex++;
+                            events.push({ time: t, msg: `${runner.id} ACQUIRES M_${act.mutex}`, kind: 'crit' });
+                            runnerForSnap = runner;
+                            executed = `acq_${act.mutex}`;
+                        } else if (mtx.holder !== runner) {
+                            runner.state = 'BLOCKED';
+                            if (runner.blockedSince === null) runner.blockedSince = t;
+                            if (!mtx.waitQueue.includes(runner)) mtx.waitQueue.push(runner);
+                            events.push({ time: t, msg: `${runner.id} requests M_${act.mutex} → BLOCKED (held by ${mtx.holder.id})`, kind: 'warn' });
+                            runningId = null;
+                            runner = null;
+                        }
+                    } else if (act.type === 'RELEASE') {
+                        const mtx = mutexes[act.mutex];
+                        mtx.holder = null;
+                        runner.holds = runner.holds.filter(m => m !== act.mutex);
+                        runner.actionIndex++;
+                        events.push({ time: t, msg: `${runner.id} RELEASES M_${act.mutex}`, kind: 'crit' });
+                        runnerForSnap = runner;
+                        executed = `rel_${act.mutex}`;
+                        for (const w of mtx.waitQueue) {
+                            if (w.state === 'BLOCKED') {
+                                w.state = 'READY';
+                                w.blockedSince = null;
+                                events.push({ time: t, msg: `${w.id} unblocked (waiting for M_${act.mutex})`, kind: 'good' });
+                            }
+                        }
+                        mtx.waitQueue = [];
+                        if (runner.actionIndex >= runner.actions.length) {
+                            runner.state = 'DONE';
+                            events.push({ time: t, msg: `${runner.id} finishes`, kind: 'good' });
+                            runningId = null;
+                        }
+                    }
+                }
+
+                // Deadlock check
+                let isDeadlocked = checkDeadlock(t);
+                if (isDeadlocked && deadlockReportedAt === null) {
+                    deadlockReportedAt = t;
+                    events.push({ time: t, msg: `DEADLOCK DETECTED — circular wait`, kind: 'alarm' });
+                }
+                if (isDeadlocked) deadlockTicks++;
+
+                const snap = { time: t,
+                               runnerId: runnerForSnap ? runnerForSnap.id : null,
+                               action: executed,
+                               mutexS: mutexes.S.holder ? mutexes.S.holder.id : null,
+                               mutexD: mutexes.D.holder ? mutexes.D.holder.id : null,
+                               deadlocked: isDeadlocked,
+                               states: {}, holds: {} };
+                for (const x of rt) { snap.states[x.id] = x.state; snap.holds[x.id] = [...x.holds]; }
+                history.push(snap);
+            }
+
+            // Stats
+            let aEnd = null, bEnd = null;
+            for (let i = 0; i < history.length; i++) {
+                if (aEnd === null && history[i].states['A'] === 'DONE') aEnd = history[i].time;
+                if (bEnd === null && history[i].states['B'] === 'DONE') bEnd = history[i].time;
+            }
+            return { history, events, stats: { aEnd, bEnd, timeoutCount, deadlockReportedAt, deadlockTicks } };
+        }
+
+        function syncAndRun() {
+            try {
+                document.getElementById('errorBox').style.display = 'none';
+                syncTaskInputs();
+
+                const mode = document.getElementById('modeSelect').value;
+                const timeoutThreshold = parseInt(document.getElementById('timeoutInput').value) || 4;
+                const pill = document.getElementById('modePill');
+                if (mode === 'solution') {
+                    pill.className = 'mode-pill solution';
+                    pill.textContent = 'TIMEOUT FIX';
+                } else {
+                    pill.className = 'mode-pill problem';
+                    pill.textContent = 'PROBLEM';
+                }
+
+                lastResult = simulate(mode === 'solution', timeoutThreshold);
+
+                // Both scenarios stats
+                const probResult = simulate(false, timeoutThreshold);
+                const solResult  = simulate(true, timeoutThreshold);
+                document.getElementById('probAEnd').textContent = probResult.stats.aEnd ?? '— (deadlocked)';
+                document.getElementById('probBEnd').textContent = probResult.stats.bEnd ?? '— (deadlocked)';
+                document.getElementById('probDL').textContent = probResult.stats.deadlockReportedAt !== null
+                    ? `tick ${probResult.stats.deadlockReportedAt}`
+                    : 'none';
+                document.getElementById('solAEnd').textContent = solResult.stats.aEnd ?? '—';
+                document.getElementById('solBEnd').textContent = solResult.stats.bEnd ?? '—';
+                document.getElementById('solTOs').textContent = solResult.stats.timeoutCount;
+
+                // Alarm box
+                const alarm = document.getElementById('alarmBox');
+                if (lastResult.stats.deadlockReportedAt !== null && mode === 'problem') {
+                    alarm.classList.add('show');
+                    alarm.textContent = `⚠ DEADLOCK DETECTED at tick ${lastResult.stats.deadlockReportedAt}`;
+                } else if (mode === 'solution' && lastResult.stats.timeoutCount > 0) {
+                    alarm.classList.add('show');
+                    alarm.style.background = '#e4f5e4';
+                    alarm.style.color = '#1e8449';
+                    alarm.style.borderColor = '#a9dfbf';
+                    alarm.style.animation = 'none';
+                    alarm.textContent = `✓ ${lastResult.stats.timeoutCount} timeout(s) fired, deadlock recovered`;
+                } else {
+                    alarm.classList.remove('show');
+                    alarm.style.background = '';
+                    alarm.style.color = '';
+                    alarm.style.borderColor = '';
+                    alarm.style.animation = '';
+                }
+
+                redraw();
+            } catch(err) {
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').innerText = "Sim Error: " + err.message;
+            }
+        }
+
+        // ===========================================================================
+        // CANVAS DRAWING
+        // ===========================================================================
+        function redraw() {
+            try {
+                let zoom = parseFloat(document.getElementById('zoomLevel').value) || 1;
+                let baseWidth = wrapper ? wrapper.clientWidth : 900;
+                if (baseWidth < 100) baseWidth = 900;
+
+                canvas.width = Math.max(baseWidth, 900) * zoom;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                const L = 160, R = 30, T = 90, B = 50;
+                const activeTasks = tasks.filter(t => t.enabled);
+                // Layout: tasks at top, then 2 mutex rows below
+                const totalRows = activeTasks.length + 2; // tasks + S + D
+                const rowH = (canvas.height - T - B) / Math.max(totalRows, 1);
+                const scale = (canvas.width - L - R) / TICKS;
+
+                // Title
+                ctx.fillStyle = '#2c3e50';
+                ctx.font = 'bold 14px Segoe UI';
+                ctx.textAlign = 'left';
+                const modeText = document.getElementById('modeSelect').value === 'solution'
+                    ? 'Mode: Mutex Timeout Recovery'
+                    : 'Mode: No Recovery (Deadlock Possible)';
+                ctx.fillText('Execution Timeline · ' + modeText, L, 25);
+
+                // Time axis grid
+                for (let t = 0; t <= TICKS; t++) {
+                    const x = L + t * scale;
+                    ctx.beginPath();
+                    ctx.moveTo(x, T - 8);
+                    ctx.lineTo(x, canvas.height - B);
+                    ctx.strokeStyle = (t % 5 === 0) ? '#bdc3c7' : '#ecf0f1';
+                    ctx.lineWidth = (t % 5 === 0) ? 1.5 : 1;
+                    ctx.stroke();
+                    if (t % 5 === 0 || zoom >= 2) {
+                        ctx.fillStyle = '#7f8c8d';
+                        ctx.font = '10px Segoe UI';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(t, x, canvas.height - B + 15);
+                    }
+                }
+
+                const getY = (rowIndex) => T + rowIndex * rowH + rowH / 2;
+
+                // Row labels
+                activeTasks.forEach((t, i) => {
+                    const y = getY(i);
+                    ctx.fillStyle = t.color;
+                    ctx.font = 'bold 12px Segoe UI';
+                    ctx.textAlign = 'right';
+                    ctx.fillText(`${t.id}`, L - 12, y + 5);
+                    ctx.beginPath();
+                    ctx.moveTo(L, T + (i + 1) * rowH);
+                    ctx.lineTo(canvas.width - R, T + (i + 1) * rowH);
+                    ctx.strokeStyle = '#ecf0f1';
+                    ctx.stroke();
+                });
+                // Mutex row labels
+                const sRowY = getY(activeTasks.length);
+                const dRowY = getY(activeTasks.length + 1);
+                ctx.fillStyle = '#8e44ad';
+                ctx.font = 'bold 12px Segoe UI';
+                ctx.textAlign = 'right';
+                ctx.fillText('M_Sensor', L - 12, sRowY + 5);
+                ctx.fillStyle = '#16a085';
+                ctx.fillText('M_Disk', L - 12, dRowY + 5);
+                ctx.beginPath();
+                ctx.moveTo(L, T + (activeTasks.length + 1) * rowH);
+                ctx.lineTo(canvas.width - R, T + (activeTasks.length + 1) * rowH);
+                ctx.strokeStyle = '#ecf0f1';
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(L, T + (activeTasks.length + 2) * rowH);
+                ctx.lineTo(canvas.width - R, T + (activeTasks.length + 2) * rowH);
+                ctx.strokeStyle = '#ecf0f1';
+                ctx.stroke();
+                // Separator between tasks and mutexes
+                ctx.beginPath();
+                ctx.moveTo(L, T + activeTasks.length * rowH);
+                ctx.lineTo(canvas.width - R, T + activeTasks.length * rowH);
+                ctx.strokeStyle = '#bdc3c7';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.lineWidth = 1;
+
+                // Render history
+                const history = lastResult.history;
+                for (let i = 0; i < history.length; i++) {
+                    const snap = history[i];
+                    const x = L + snap.time * scale;
+                    const w = scale;
+
+                    activeTasks.forEach((tCfg, idx) => {
+                        const state = snap.states[tCfg.id];
+                        if (!state) return;
+                        const y = getY(idx);
+                        const barH = rowH * 0.55;
+                        const barY = y - barH / 2;
+
+                        if (state === 'RUNNING' || (snap.runnerId === tCfg.id && state === 'DONE')) {
+                            ctx.fillStyle = tCfg.color;
+                            ctx.fillRect(x, barY, w, barH);
+                            // Action label inside bar
+                            if (snap.action && w > 18) {
+                                ctx.fillStyle = '#fff';
+                                ctx.font = 'bold 9px Segoe UI';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(snap.action, x + w/2, barY + barH/2 + 3);
+                            }
+                        } else if (state === 'BLOCKED') {
+                            const isDeadlocked = snap.deadlocked;
+                            ctx.fillStyle = isDeadlocked ? '#fff' : '#fadbd8';
+                            ctx.fillRect(x, barY, w, barH);
+                            ctx.save();
+                            ctx.beginPath();
+                            ctx.rect(x, barY, w, barH);
+                            ctx.clip();
+                            ctx.strokeStyle = isDeadlocked ? '#000' : '#c0392b';
+                            ctx.lineWidth = 1.4;
+                            for (let k = -barH; k < w + barH; k += isDeadlocked ? 4 : 5) {
+                                ctx.beginPath();
+                                ctx.moveTo(x + k, barY);
+                                ctx.lineTo(x + k + barH, barY + barH);
+                                ctx.stroke();
+                            }
+                            ctx.restore();
+                            ctx.strokeStyle = '#c0392b';
+                            ctx.lineWidth = 1;
+                            ctx.strokeRect(x, barY, w, barH);
+                        } else if (state === 'BACKOFF') {
+                            ctx.fillStyle = '#f5cba7';
+                            ctx.fillRect(x, barY, w, barH);
+                            ctx.strokeStyle = '#d35400';
+                            ctx.setLineDash([3, 2]);
+                            ctx.strokeRect(x, barY, w, barH);
+                            ctx.setLineDash([]);
+                        } else if (state === 'READY') {
+                            ctx.fillStyle = '#ecf0f1';
+                            ctx.fillRect(x, barY, w, barH);
+                            ctx.strokeStyle = '#bdc3c7';
+                            ctx.setLineDash([2, 2]);
+                            ctx.strokeRect(x, barY, w, barH);
+                            ctx.setLineDash([]);
+                        }
+                    });
+
+                    // Mutex S row
+                    if (snap.mutexS) {
+                        const holder = activeTasks.find(t => t.id === snap.mutexS);
+                        if (holder) {
+                            const barH = rowH * 0.55;
+                            const barY = sRowY - barH / 2;
+                            ctx.fillStyle = holder.color;
+                            ctx.fillRect(x, barY, w, barH);
+                            ctx.strokeStyle = '#8e44ad';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(x + 1, barY + 1, w - 2, barH - 2);
+                            ctx.lineWidth = 1;
+                            if (w > 14) {
+                                ctx.fillStyle = '#fff';
+                                ctx.font = 'bold 10px Segoe UI';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(snap.mutexS, x + w/2, barY + barH/2 + 4);
+                            }
+                        }
+                    }
+                    // Mutex D row
+                    if (snap.mutexD) {
+                        const holder = activeTasks.find(t => t.id === snap.mutexD);
+                        if (holder) {
+                            const barH = rowH * 0.55;
+                            const barY = dRowY - barH / 2;
+                            ctx.fillStyle = holder.color;
+                            ctx.fillRect(x, barY, w, barH);
+                            ctx.strokeStyle = '#16a085';
+                            ctx.lineWidth = 2;
+                            ctx.strokeRect(x + 1, barY + 1, w - 2, barH - 2);
+                            ctx.lineWidth = 1;
+                            if (w > 14) {
+                                ctx.fillStyle = '#fff';
+                                ctx.font = 'bold 10px Segoe UI';
+                                ctx.textAlign = 'center';
+                                ctx.fillText(snap.mutexD, x + w/2, barY + barH/2 + 4);
+                            }
+                        }
+                    }
+                }
+
+                // Deadlock vertical marker
+                if (lastResult.stats.deadlockReportedAt !== null && document.getElementById('modeSelect').value === 'problem') {
+                    const dlx = L + lastResult.stats.deadlockReportedAt * scale;
+                    ctx.strokeStyle = '#c0392b';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(dlx, T - 8);
+                    ctx.lineTo(dlx, canvas.height - B);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.lineWidth = 1;
+                    ctx.fillStyle = '#c0392b';
+                    ctx.font = 'bold 11px Segoe UI';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`⚠ DEADLOCK at t=${lastResult.stats.deadlockReportedAt}`, dlx + 4, T - 12);
+                }
+
+                // Preemption arrows
+                for (let i = 1; i < history.length; i++) {
+                    const prev = history[i-1].runnerId;
+                    const cur = history[i].runnerId;
+                    if (prev && cur && prev !== cur) {
+                        const prevStateNow = history[i].states[prev];
+                        if (prevStateNow === 'READY') {
+                            const x = L + history[i].time * scale;
+                            const idxPrev = activeTasks.findIndex(x => x.id === prev);
+                            const idxCur = activeTasks.findIndex(x => x.id === cur);
+                            if (idxPrev < 0 || idxCur < 0) continue;
+                            const y1 = getY(idxPrev);
+                            const y2 = getY(idxCur);
+                            ctx.strokeStyle = '#c0392b';
+                            ctx.lineWidth = 2;
+                            ctx.beginPath();
+                            ctx.moveTo(x, y1);
+                            ctx.lineTo(x, y2);
+                            ctx.stroke();
+                            ctx.fillStyle = '#c0392b';
+                            const dir = y2 > y1 ? 1 : -1;
+                            ctx.beginPath();
+                            ctx.moveTo(x, y2 - 5 * dir);
+                            ctx.lineTo(x - 5, y2 - 12 * dir);
+                            ctx.lineTo(x + 5, y2 - 12 * dir);
+                            ctx.closePath();
+                            ctx.fill();
+                        }
+                    }
+                }
+            } catch(err) {
+                document.getElementById('errorBox').style.display = 'block';
+                document.getElementById('errorBox').innerText = "Draw Error: " + err.message;
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', init);
+        window.addEventListener('resize', () => { redraw(); });
+    </script>
+</body>
+</html>
