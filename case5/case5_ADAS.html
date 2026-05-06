@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Case 5 - ADAS RTOS Full System Integration</title>
+<style>
+body{font-family:Segoe UI,system-ui,sans-serif;margin:0;background:#f4f7f6;color:#263238}header{background:#263238;color:white;padding:18px 24px}main{display:grid;grid-template-columns:380px 1fr;gap:16px;padding:16px}.panel{background:white;border-radius:10px;box-shadow:0 3px 8px #0002;padding:14px}.row{display:grid;grid-template-columns:1fr 90px;gap:8px;align-items:center;margin:8px 0}input,select,button{padding:8px;border:1px solid #cfd8dc;border-radius:6px}button{background:#1976d2;color:white;font-weight:700;cursor:pointer}.btn2{background:#455a64}.warn{background:#fff3cd;border-left:5px solid #f9a825;padding:10px;border-radius:6px;font-size:.9rem}.stat{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.card{background:#eef5ff;border-radius:8px;padding:8px;font-size:.85rem}.canvasWrap{overflow:auto;border:1px solid #ddd;border-radius:8px;background:#fff}canvas{display:block}.legend span{display:inline-block;margin:4px 8px 4px 0}.dot{width:12px;height:12px;border-radius:3px;vertical-align:-2px;margin-right:4px}#log{height:170px;overflow:auto;background:#101820;color:#d6f5d6;padding:8px;border-radius:8px;font-family:ui-monospace,monospace;font-size:12px}details{font-size:.9rem}table{width:100%;border-collapse:collapse;font-size:.85rem}td,th{border-bottom:1px solid #eee;padding:5px;text-align:left}</style>
+</head>
+<body>
+<header><h1>Case Study 5 - ADAS RTOS Integration</h1><div>ISR_Radar + Queue_Radar + Task_Compute + Mutex_Brake + Task_Log</div></header>
+<main>
+<section class="panel">
+<h2>Kontroller</h2>
+<div class="row"><label>Simülasyon süresi (ms)</label><input id="duration" type="number" value="600" min="500"></div>
+<div class="row"><label>Radar ISR periyodu (ms)</label><input id="radarPeriod" type="number" value="20"></div>
+<div class="row"><label>Obstacle olasılığı (%)</label><input id="obstaclePct" type="number" value="55" min="0" max="100"></div>
+<div class="row"><label>Queue kapasitesi</label><input id="qCap" type="number" value="5" min="1"></div>
+<div class="row"><label>Compute exec (ms)</label><input id="computeExec" type="number" value="8"></div>
+<div class="row"><label>Brake mutex süresi (ms)</label><input id="brakeExec" type="number" value="10"></div>
+<div class="row"><label>Log periyodu / exec</label><input id="logCfg" value="50,14"></div>
+<div class="row"><label>Mode</label><select id="mode"><option value="normal">Successful orchestration</option><option value="overload">Overload / queue waiting visible</option></select></div>
+<button onclick="run()">Simülasyonu Çalıştır</button>
+<button class="btn2" onclick="downloadCanvas()" style="margin-top:8px">Grafiği PNG İndir</button>
+<div class="warn" style="margin-top:12px"><b>Rapor notu:</b> En az 500ms snapshot için duration 600ms bırakıldı. Kırmızı dikey çizgiler ISR interrupt anlarını, mavi queue doluluğunu, kahverengi alan brake mutex kilidini gösterir.</div>
+<h3>Özet</h3><div class="stat"><div class="card" id="s1"></div><div class="card" id="s2"></div><div class="card" id="s3"></div><div class="card" id="s4"></div></div>
+<h3>Log</h3><div id="log"></div>
+<details open><summary>Case 5 savunma metni kısa not</summary><p><b>AI hatası 1:</b> ISR'ı normal task gibi uzun süre CPU'da koşturmak. ISR kısa olmalı, sadece queue'ya mesaj bırakıp çıkmalı. <b>Düzeltme:</b> ISR 1ms blok olarak çizildi, asıl hesap Compute task'a bırakıldı.</p><p><b>AI hatası 2:</b> Log task'ın brake mutex'i kilitlemesi. Gereksinimde Log sadece brake mutex durumunu kontrol eder; frene sahip olmamalı. <b>Düzeltme:</b> Log mutex doluyken BLOCKED/WAIT gösterir, boşken SD write yapar.</p></details>
+</section>
+<section class="panel"><div class="legend"><span><i class="dot" style="background:#e53935"></i>ISR_Radar</span><span><i class="dot" style="background:#43a047"></i>Task_Compute</span><span><i class="dot" style="background:#8e24aa"></i>Task_Log</span><span><i class="dot" style="background:#6d4c41"></i>Mutex_Brake locked</span><span><i class="dot" style="background:#1e88e5"></i>Queue level</span><span><i class="dot" style="background:#eee"></i>IDLE</span></div><div class="canvasWrap"><canvas id="cv" width="1250" height="620"></canvas></div></section>
+</main>
+<script>
+const rows=[{id:'ISR_Radar',color:'#e53935'},{id:'Task_Compute',color:'#43a047'},{id:'Task_Log',color:'#8e24aa'},{id:'Mutex_Brake',color:'#6d4c41'},{id:'Queue_Radar',color:'#1e88e5'},{id:'IDLE',color:'#eee'}];
+let result={blocks:[],events:[],queue:[],drops:0,brakes:0,waits:[],avgWait:0};
+function val(id){return document.getElementById(id).value}function num(id){return Number(val(id))}
+function log(msg){document.getElementById('log').innerHTML+=msg+'<br>'}
+function addBlock(id,start,end,note=''){if(end>start)result.blocks.push({id,start,end,note,color:(rows.find(r=>r.id==id)||{}).color||'#999'});}
+function run(){result={blocks:[],events:[],queue:[],drops:0,brakes:0,waits:[],avgWait:0};document.getElementById('log').innerHTML='';
+ let dur=Math.max(500,num('duration')),rp=num('radarPeriod'),cap=num('qCap'),ce=num('computeExec'),be=num('brakeExec');let [lp,le]=val('logCfg').split(',').map(Number);let pct=num('obstaclePct')/100;if(val('mode')==='overload'){pct=.95;ce+=8;}
+ let q=[],cpuFree=0,mutexFree=0,lastIdle=0,seed=7;function rnd(){seed=(seed*9301+49297)%233280;return seed/233280;}
+ for(let t=0;t<dur;t++){
+   if(t%rp===0){result.events.push({t,type:'ISR'});addBlock('ISR_Radar',t,t+1,'Radar interrupt'); if(rnd()<pct){ if(q.length<cap){q.push({t,risk:rnd()>.25});log(`[${t}ms] ISR_Radar obstacle -> Queue_Radar (${q.length}/${cap})`)} else {result.drops++;log(`[${t}ms] Queue full, radar msg DROPPED`)}}}
+   if(t%lp===0 && t>=5){let start=Math.max(cpuFree,t); if(start<mutexFree){result.waits.push({id:'Task_Log',start,end:mutexFree});log(`[${t}ms] Task_Log brake mutex busy -> waits/checks state`);start=mutexFree;} if(start>lastIdle)addBlock('IDLE',lastIdle,start); addBlock('Task_Log',start,start+le,'SD card write'); cpuFree=start+le; lastIdle=cpuFree;}
+   if(q.length && cpuFree<=t){let msg=q.shift();let start=t;if(start>lastIdle)addBlock('IDLE',lastIdle,start);addBlock('Task_Compute',start,start+ce,`wait=${start-msg.t}ms`);result.waits.push({id:'QueueWait',start:msg.t,end:start});cpuFree=start+ce;lastIdle=cpuFree;if(msg.risk){let bs=cpuFree;addBlock('Mutex_Brake',bs,bs+be,'Brake applied');mutexFree=bs+be;result.brakes++;log(`[${bs}ms] Task_Compute locks Mutex_Brake and applies brake`);}}
+   result.queue.push({t,len:q.length});
+ }
+ if(lastIdle<dur)addBlock('IDLE',lastIdle,dur);let qw=result.waits.filter(w=>w.id==='QueueWait').map(w=>w.end-w.start);result.avgWait=qw.length?qw.reduce((a,b)=>a+b,0)/qw.length:0;draw(dur);document.getElementById('s1').innerHTML=`Radar drops<br><b>${result.drops}</b>`;document.getElementById('s2').innerHTML=`Brake actions<br><b>${result.brakes}</b>`;document.getElementById('s3').innerHTML=`Avg queue wait<br><b>${result.avgWait.toFixed(1)}ms</b>`;document.getElementById('s4').innerHTML=`Snapshot<br><b>${dur}ms</b>`;}
+function draw(dur){let c=document.getElementById('cv'),ctx=c.getContext('2d');c.width=Math.max(1200,dur*2);ctx.clearRect(0,0,c.width,c.height);let L=150,T=45,R=30,rowH=78,scale=(c.width-L-R)/dur;ctx.font='12px Segoe UI';ctx.textAlign='right';rows.forEach((r,i)=>{let y=T+i*rowH+30;ctx.fillStyle=r.color;ctx.fillText(r.id,L-12,y+4);ctx.strokeStyle='#eee';ctx.beginPath();ctx.moveTo(L,y+32);ctx.lineTo(c.width-R,y+32);ctx.stroke();});for(let t=0;t<=dur;t+=20){let x=L+t*scale;ctx.strokeStyle=t%100?'#eee':'#ccc';ctx.beginPath();ctx.moveTo(x,25);ctx.lineTo(x,560);ctx.stroke();if(t%100===0){ctx.fillStyle='#777';ctx.textAlign='center';ctx.fillText(t+'ms',x,590)}}function y(id){return T+rows.findIndex(r=>r.id===id)*rowH+30}result.blocks.forEach(b=>{let x=L+b.start*scale,w=Math.max(2,(b.end-b.start)*scale),yy=y(b.id)-20;ctx.fillStyle=b.color;ctx.fillRect(x,yy,w,38);ctx.strokeStyle='#0002';ctx.strokeRect(x,yy,w,38);if(w>40){ctx.fillStyle='white';ctx.textAlign='left';ctx.fillText(b.note,x+4,yy+23)}});result.events.forEach(e=>{let x=L+e.t*scale;ctx.strokeStyle='#e53935';ctx.beginPath();ctx.moveTo(x,25);ctx.lineTo(x,560);ctx.stroke();});ctx.textAlign='left';ctx.fillStyle='#1e88e5';ctx.beginPath();result.queue.forEach((q,i)=>{let x=L+q.t*scale,yy=y('Queue_Radar')+30-q.len*8;if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy)});ctx.strokeStyle='#1e88e5';ctx.lineWidth=3;ctx.stroke();ctx.lineWidth=1;ctx.fillStyle='#111';ctx.fillText('Annotations: ISR produces radar messages; Compute consumes queue; Brake mutex lock blocks Log checks; queue line shows waiting/backlog.',L,20)}
+function downloadCanvas(){let a=document.createElement('a');a.download='case5_adas_graph.png';a.href=document.getElementById('cv').toDataURL();a.click()}window.onload=run;
+</script>
+</body></html>

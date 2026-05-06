@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Task-2 — Producer-Consumer Queue Policy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --border: #dee2e6;
+            --text: #212529;
+            --muted: #6c757d;
+            --primary: #0d6efd;
+            --primaryHover: #0b5ed7;
+            --shadow-sm: 0 0.125rem 0.25rem rgba(0,0,0,.075);
+            --shadow: 0 0.5rem 1rem rgba(0,0,0,.08);
+            --radius: 0.5rem;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+            line-height: 1.4;
+            color: var(--text);
+            background: var(--bg);
+        }
+
+        .topbar {
+            position: sticky; top: 0; z-index: 10;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+        }
+        .topbar-inner {
+            max-width: 1280px; margin: 0 auto;
+            padding: 0.75rem 1rem;
+            display: flex; align-items: baseline;
+            justify-content: space-between; gap: 1rem;
+        }
+        .topbar h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
+        .topbar .subtitle { color: var(--muted); font-size: 0.9rem; white-space: nowrap; }
+
+        .app-shell { max-width: 1280px; margin: 0 auto; padding: 1rem; }
+
+        .layout {
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .sidebar { padding: 1rem; }
+        .main-content { padding: 1rem; overflow-x: auto; box-shadow: var(--shadow); }
+
+        .sidebar h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
+        label { display: inline-block; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.9rem; }
+
+        /* ── Queue Policy Toggle ─────────────────────────────────────────────── */
+        .policy-section { margin-bottom: 0.85rem; }
+        .policy-section .policy-label {
+            font-size: 0.82rem; font-weight: 600; color: var(--muted);
+            text-transform: uppercase; letter-spacing: .04em;
+            margin-bottom: 0.4rem;
+        }
+        .policy-toggle {
+            display: grid; grid-template-columns: 1fr 1fr;
+            border: 1px solid var(--border); border-radius: 0.5rem;
+            overflow: hidden; background: #f1f3f5;
+        }
+        .policy-btn {
+            padding: 0.55rem 0.5rem;
+            background: transparent; border: none;
+            cursor: pointer; font-weight: 600; font-size: 0.88rem;
+            color: var(--muted); transition: background 0.15s, color 0.15s;
+            display: flex; align-items: center; justify-content: center; gap: 0.35rem;
+        }
+        .policy-btn:first-child { border-right: 1px solid var(--border); }
+        .policy-btn.active[data-policy="blocked"] {
+            background: #1e40af; color: #fff;
+        }
+        .policy-btn.active[data-policy="overwrite"] {
+            background: #b45309; color: #fff;
+        }
+        .policy-btn:not(.active):hover { background: #e9ecef; }
+
+        .policy-badge {
+            display: inline-block;
+            padding: 0.15rem 0.45rem; border-radius: 99px;
+            font-size: 0.73rem; font-weight: 700; margin-left: 0.3rem;
+        }
+        .badge-blocked   { background: #dbeafe; color: #1e40af; }
+        .badge-overwrite { background: #fef3c7; color: #92400e; }
+
+        /* ── Cap / meta panel ────────────────────────────────────────────────── */
+        .cap-row {
+            display: flex; align-items: center; gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .cap-row label { margin: 0; }
+        .cap-row input { width: 70px; }
+
+        .meta-panel {
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem; background: #fcfcfd;
+            margin-bottom: 0.5rem;
+        }
+        .meta-row {
+            display: flex; align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem; margin-top: 0.5rem;
+        }
+        .meta-row:first-child { margin-top: 0; }
+        .meta-row .k { color: var(--muted); font-size: 0.9rem; }
+        .meta-row .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+        input[type="range"] { width: 100%; margin: 0.35rem 0; }
+
+        table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+        th, td { border: 1px solid var(--border); padding: 0.55rem 0.5rem; text-align: left; }
+        th { background: #f1f3f5; font-weight: 600; }
+
+        input[type="number"] {
+            width: 64px; padding: 0.35rem 0.4rem;
+            border: 1px solid var(--border); border-radius: 0.375rem;
+        }
+
+        .btn {
+            width: 100%; padding: 0.6rem 0.8rem;
+            background: var(--primary); color: #fff;
+            border: 1px solid rgba(0,0,0,.05);
+            border-radius: 0.5rem; cursor: pointer;
+            font-weight: 600; margin-top: 0.5rem;
+            box-shadow: var(--shadow-sm);
+        }
+        .btn:hover { background: var(--primaryHover); }
+        .btn:active { transform: translateY(1px); }
+
+        .prod-task { color: #1d4ed8; font-weight: 600; }
+        .cons-task { color: #15803d; font-weight: 600; }
+
+        .legend {
+            display: flex; gap: 0.55rem; flex-wrap: wrap;
+            margin-top: 0.85rem; font-size: 0.81rem;
+        }
+        .legend-item { display: flex; align-items: center; gap: 0.35rem; }
+        .legend-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; }
+
+        /* ── Metrics ─────────────────────────────────────────────────────────── */
+        .metrics-bar {
+            display: flex; gap: 0.55rem; margin-top: 0.85rem; flex-wrap: wrap;
+        }
+        .metric-chip {
+            flex: 1; min-width: 80px;
+            padding: 0.6rem 0.4rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            text-align: center; background: var(--card);
+        }
+        .metric-chip .chip-label { font-size: 0.74rem; color: var(--muted); line-height: 1.2; }
+        .metric-chip .chip-val   { font-size: 1.15rem; font-weight: 700; margin-top: 0.15rem; }
+        .chip-delivered .chip-val { color: #16a34a; }
+        .chip-prodblk   .chip-val { color: #1e40af; }
+        .chip-overwrite .chip-val { color: #b45309; }
+        .chip-consblk   .chip-val { color: #7c3aed; }
+        .chip-peak      .chip-val { color: #0369a1; }
+        .chip-idle      .chip-val { color: #94a3b8; }
+        .chip-nominal   .chip-val { color: #2563eb; }
+
+        /* ── Info + trade-off boxes ──────────────────────────────────────────── */
+        .info-box {
+            margin-top: 0.75rem; padding: 0.65rem 0.75rem;
+            border-radius: 0.375rem; font-size: 0.81rem;
+            line-height: 1.55;
+            transition: background 0.2s, border-color 0.2s, color 0.2s;
+        }
+        .info-box.mode-blocked {
+            background: #eff6ff; border: 1px solid #93c5fd; color: #1e3a8a;
+        }
+        .info-box.mode-overwrite {
+            background: #fffbeb; border: 1px solid #fcd34d; color: #78350f;
+        }
+
+        .tradeoff-box {
+            margin-top: 0.75rem; padding: 0.75rem 0.85rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--border);
+            background: #fafafa;
+            font-size: 0.8rem; line-height: 1.6; color: #374151;
+        }
+        .tradeoff-box h4 {
+            margin: 0 0 0.4rem 0;
+            font-size: 0.82rem; font-weight: 700;
+            color: var(--text); text-transform: uppercase; letter-spacing: .04em;
+        }
+        .tradeoff-row { display: flex; gap: 0.5rem; margin-top: 0.35rem; }
+        .tradeoff-icon { flex-shrink: 0; font-size: 0.85rem; }
+        .tradeoff-text b { color: #111; }
+
+        @media (max-width: 980px) {
+            .layout { grid-template-columns: 1fr; }
+            .topbar .subtitle { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <h1>Producer-Consumer — Queue Policy DEMO</h1>
+        <div class="subtitle" id="topSubtitle">Case Study 2 — True RTOS Blocking Synchronization</div>
+    </div>
+</header>
+
+<main class="app-shell">
+    <div class="layout">
+
+        <!-- ── SIDEBAR ── -->
+        <div class="sidebar card">
+            <h3>Yapılandırma</h3>
+
+            <!-- Queue Policy Toggle -->
+            <div class="policy-section">
+                <div class="policy-label">Queue Policy</div>
+                <div class="policy-toggle">
+                    <button class="policy-btn active" data-policy="blocked"
+                            id="btnBlocked" onclick="setPolicy('blocked')">
+                        Blocked
+                        <span class="policy-badge badge-blocked"></span>
+                    </button>
+                    <button class="policy-btn" data-policy="overwrite"
+                            id="btnOverwrite" onclick="setPolicy('overwrite')">
+                        Overwrite
+                        <span class="policy-badge badge-overwrite"></span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="cap-row">
+                <label for="queueCap">Queue Capacity:</label>
+                <input type="number" id="queueCap" value="5" min="1" max="50" oninput="syncAndRun()">
+            </div>
+
+            <div class="meta-panel">
+                <div class="meta-row">
+                    <div class="k">Zaman Ekseni Zoom:</div>
+                    <div class="v"><span id="zoomLabel">1.00×</span></div>
+                </div>
+                <input id="zoomRange" type="range" min="1" max="5" step="0.25" value="1" oninput="setZoom(this.value)">
+                <div class="meta-row">
+                    <div class="k">Nominal CPU Yükü:</div>
+                    <div class="v"><span id="cpuLoadLabel">%0.0</span></div>
+                </div>
+            </div>
+
+            <table id="taskTable">
+                <thead>
+                    <tr>
+                        <th>Görev</th>
+                        <th>Prio</th>
+                        <th>Periyot</th>
+                        <th>Exec</th>
+                    </tr>
+                </thead>
+                <tbody><!-- Populated by JS --></tbody>
+            </table>
+
+            <button class="btn" onclick="syncAndRun()">Yeniden Simüle Et</button>
+
+            <div class="legend" id="legendBox"></div>
+
+            <div class="info-box mode-blocked" id="infoBox"></div>
+
+            <!-- Trade-off explanation -->
+            <div class="tradeoff-box">
+                <h4>Policy Trade-offs</h4>
+                <div class="tradeoff-row">
+                    <div class="tradeoff-icon">🔒</div>
+                    <div class="tradeoff-text">
+                        <b>Blocked (RTOS Semaphore):</b>
+                        Zero data loss — every message is guaranteed to be consumed.
+                        Trade-off: Producer latency increases when the queue is full;
+                        the system may stall under heavy load.
+                    </div>
+                </div>
+                <div class="tradeoff-row">
+                    <div class="tradeoff-icon">↺</div>
+                    <div class="tradeoff-text">
+                        <b>Overwrite (Ring Buffer):</b>
+                        Always stays current — Producer never stalls.
+                        Trade-off: Old messages are silently overwritten;
+                        historical data is lost if the Consumer is too slow.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── MAIN CONTENT ── -->
+        <div class="main-content card">
+            <div id="canvasWrapper">
+                <canvas id="timelineCanvas" height="460"></canvas>
+            </div>
+            <div class="metrics-bar" id="metricsBar">
+                <div class="metric-chip chip-delivered">
+                    <div class="chip-label">Teslim Edilen</div>
+                    <div class="chip-val" id="metDelivered">—</div>
+                </div>
+                <!-- chip-second changes label+class between modes -->
+                <div class="metric-chip" id="chipSecond">
+                    <div class="chip-label" id="chipSecondLabel">Producer Blocked</div>
+                    <div class="chip-val"   id="metSecond">—</div>
+                </div>
+                <div class="metric-chip chip-consblk">
+                    <div class="chip-label">Consumer Blocked</div>
+                    <div class="chip-val" id="metConsBlk">—</div>
+                </div>
+                <div class="metric-chip chip-peak">
+                    <div class="chip-label">Queue Peak</div>
+                    <div class="chip-val" id="metQueuePeak">—</div>
+                </div>
+                <div class="metric-chip chip-idle">
+                    <div class="chip-label">CPU IDLE</div>
+                    <div class="chip-val" id="metIdle">—</div>
+                </div>
+                <div class="metric-chip chip-nominal">
+                    <div class="chip-label">Nominal Yük</div>
+                    <div class="chip-val" id="metNominal">—</div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</main>
+
+<script>
+    // ── Colour palette ─────────────────────────────────────────────────────────
+    const PROD_COLOR       = '#2563eb';
+    const PROD_BLK_COLOR   = '#f97316';   // Producer BLOCKED (queue full, blocked mode)
+    const CONS_COLOR       = '#16a34a';
+    const CONS_BLK_COLOR   = '#a78bfa';   // Consumer BLOCKED (queue empty)
+    const CPU_ACTIVE_COLOR = '#0d9488';
+    const CPU_IDLE_COLOR   = '#94a3b8';
+    const OW_COLOR         = '#ef4444';   // Overwrite event marker
+
+    // ── Task definitions ───────────────────────────────────────────────────────
+    let tasks = [
+        { id: 'prod', name: 'Producer', type: 'prod', priority: 90, period: 100, exec: 10, color: PROD_COLOR },
+        { id: 'cons', name: 'Consumer', type: 'cons', priority: 40, period: 500, exec: 50, color: CONS_COLOR }
+    ];
+
+    const totalTime    = 1000;
+    let zoomFactor     = 1;
+    let currentPolicy  = 'blocked';   // 'blocked' | 'overwrite'
+    let lastResult     = {};
+
+    const canvas = document.getElementById('timelineCanvas');
+    const ctx    = canvas.getContext('2d');
+
+    // ── Policy toggle ──────────────────────────────────────────────────────────
+    function setPolicy(p) {
+        currentPolicy = p;
+        document.getElementById('btnBlocked').classList.toggle('active',   p === 'blocked');
+        document.getElementById('btnOverwrite').classList.toggle('active', p === 'overwrite');
+        updateLegend();
+        updateInfoBox();
+        updateSubtitle();
+        syncAndRun();
+    }
+
+    function updateSubtitle() {
+        document.getElementById('topSubtitle').textContent =
+            currentPolicy === 'blocked'
+                ? 'Case Study 2 — True RTOS Blocking Synchronization'
+                : 'Case Study 2 — Ring Buffer (Overwrite on Full)';
+    }
+
+    function updateLegend() {
+        const box = document.getElementById('legendBox');
+        const blocked = currentPolicy === 'blocked';
+        const items = [
+            { color: PROD_COLOR,                           border: null,      label: 'Producer çalışıyor' },
+            blocked
+              ? { color: PROD_BLK_COLOR, border: '#ea580c', label: 'Producer BLOCKED (kuyruk dolu)' }
+              : { color: OW_COLOR,       border: null,      label: 'Overwrite — eski mesaj silindi' },
+            { color: CONS_COLOR,                           border: null,      label: 'Consumer çalışıyor' },
+            { color: CONS_BLK_COLOR,                       border: '#7c3aed', label: 'Consumer BLOCKED (kuyruk boş)' },
+            { color: CPU_IDLE_COLOR,                       border: null,      label: 'CPU IDLE' },
+            { color: '#22c55e',                            border: null,      label: 'Queue <50%' },
+            { color: '#f97316',                            border: null,      label: 'Queue 50-99%' },
+            { color: OW_COLOR,                             border: null,      label: 'Queue FULL' },
+        ];
+        box.innerHTML = items.map(it => `
+            <div class="legend-item">
+                <div class="legend-dot" style="background:${it.color};${it.border ? `border:1px solid ${it.border};` : ''}"></div>
+                ${it.label}
+            </div>`).join('');
+    }
+
+    function updateInfoBox() {
+        const box = document.getElementById('infoBox');
+        if (currentPolicy === 'blocked') {
+            box.className = 'info-box mode-blocked';
+            box.innerHTML = `<b>🔒 Gerçek RTOS Bloklama:</b><br>
+                • Producer kuyruk <b>dolduğunda BLOCKED</b> olur — mesaj düşürülmez.<br>
+                • Consumer kuyruk <b>boşken BLOCKED</b> olur — veri beklenir.<br>
+                • <b>Drop Rate = %0.0</b> — tüm mesajlar teslim edilir.`;
+        } else {
+            box.className = 'info-box mode-overwrite';
+            box.innerHTML = `<b>↺ Ring Buffer Modu:</b><br>
+                • Producer <b>hiç beklemez</b> — kuyruk doluysa en eski veriyi siler.<br>
+                • Consumer kuyruk <b>boşken BLOCKED</b> olmaya devam eder.<br>
+                • Hız önceliklidir; eski mesajlar <b>kaybolabilir</b>.`;
+        }
+    }
+
+    // ── Zoom ───────────────────────────────────────────────────────────────────
+    function setZoom(v) {
+        zoomFactor = parseFloat(v) || 1;
+        document.getElementById('zoomLabel').textContent = `${zoomFactor.toFixed(2)}×`;
+        redraw();
+    }
+
+    // ── Nominal CPU load ───────────────────────────────────────────────────────
+    function updateNominalCpuLoad() {
+        const util = tasks.reduce((a, t) => a + t.exec / Math.max(1, t.period), 0);
+        document.getElementById('cpuLoadLabel').textContent = `%${(util * 100).toFixed(1)}`;
+    }
+
+    // ── Init ───────────────────────────────────────────────────────────────────
+    function init() {
+        const tbody = document.querySelector('#taskTable tbody');
+        tbody.innerHTML = '';
+        tasks.forEach(t => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="${t.type}-task">${t.name}</td>
+                <td><input type="number" id="prio_${t.id}"   value="${t.priority}" oninput="syncAndRun()"></td>
+                <td><input type="number" id="period_${t.id}" value="${t.period}"   oninput="syncAndRun()"></td>
+                <td><input type="number" id="exec_${t.id}"   value="${t.exec}"     oninput="syncAndRun()"></td>
+            `;
+            tbody.appendChild(tr);
+        });
+        updateLegend();
+        updateInfoBox();
+        updateSubtitle();
+        setZoom(1);
+        syncAndRun();
+    }
+
+    // ── Sync inputs ─────────────────────────────────────────────────────────────
+    function syncAndRun() {
+        tasks.forEach(t => {
+            t.priority = parseInt(document.getElementById(`prio_${t.id}`).value)   || 0;
+            t.period   = Math.max(1, parseInt(document.getElementById(`period_${t.id}`).value) || 1);
+            t.exec     = Math.max(0, parseInt(document.getElementById(`exec_${t.id}`).value)   || 0);
+        });
+        updateNominalCpuLoad();
+        runSimOnly();
+    }
+
+    // ── State array → [{start,end,color}] ─────────────────────────────────────
+    function stateToBlocks(arr, testFn, color) {
+        const blocks = [];
+        let start = -1;
+        for (let i = 0; i <= arr.length; i++) {
+            const match = i < arr.length && testFn(arr[i]);
+            if (match) { if (start < 0) start = i; }
+            else        { if (start >= 0) { blocks.push({ start, end: i, color }); start = -1; } }
+        }
+        return blocks;
+    }
+
+    // ── Core simulation ────────────────────────────────────────────────────────
+    function runSimOnly() {
+        const prodTask = tasks.find(t => t.id === 'prod');
+        const consTask = tasks.find(t => t.id === 'cons');
+        const qCap     = Math.max(1, parseInt(document.getElementById('queueCap').value) || 5);
+        const policy   = currentPolicy;
+
+        // Periodic job instances
+        const prodJobs = [];
+        const consJobs = [];
+        for (let s = 0; s < totalTime; s += prodTask.period)
+            prodJobs.push({ release: s, remaining: prodTask.exec, done: false, started: false });
+        for (let s = 0; s < totalTime; s += consTask.period)
+            consJobs.push({ release: s, remaining: consTask.exec, done: false, started: false });
+
+        let queueSize = 0;
+
+        const cpuState       = [];   // 'prod' | 'cons' | 'idle'
+        const prodRowState   = [];   // 'run'  | 'blocked' | 'idle'
+        const consRowState   = [];   // 'run'  | 'blocked' | 'idle'
+        const queueHistory   = [];
+        const overwriteTicks = [];   // ticks where an overwrite happened (ring buffer mode)
+
+        for (let t = 0; t < totalTime; t++) {
+            const pJob = prodJobs.find(j => j.release <= t && !j.done) || null;
+            const cJob = consJobs.find(j => j.release <= t && !j.done) || null;
+
+            // ── Blocking condition ───────────────────────────────────────────
+            // In 'overwrite' mode, Producer is never blocked by the queue.
+            const prodBlocked = policy === 'blocked'
+                ? (pJob && !pJob.started && queueSize >= qCap)
+                : false;
+
+            // Consumer always blocks when queue is empty (both modes)
+            const consBlocked = cJob && !cJob.started && queueSize === 0;
+
+            const prodCanRun  = pJob && (pJob.started || !prodBlocked);
+            const consCanRun  = cJob && (cJob.started || !consBlocked);
+
+            let cpuSt, pRowSt, cRowSt;
+
+            if (prodCanRun && pJob.remaining > 0) {
+                // Producer runs (highest priority)
+                if (!pJob.started) pJob.started = true;
+                cpuSt  = 'prod';
+                pRowSt = 'run';
+                cRowSt = cJob ? (consBlocked ? 'blocked' : 'idle') : 'idle';
+
+                pJob.remaining--;
+                if (pJob.remaining === 0) {
+                    pJob.done = true;
+                    if (queueSize < qCap) {
+                        queueSize++;                      // normal enqueue
+                    } else if (policy === 'overwrite') {
+                        // Ring buffer: overwrite oldest, queue stays at cap
+                        overwriteTicks.push(t);
+                    }
+                    // 'blocked' mode: this branch is unreachable because prodBlocked
+                    // prevents the job from starting when queue >= qCap
+                }
+
+            } else if (consCanRun && cJob.remaining > 0) {
+                // Consumer runs
+                if (!cJob.started) cJob.started = true;
+                cpuSt  = 'cons';
+                cRowSt = 'run';
+                pRowSt = pJob ? (prodBlocked ? 'blocked' : 'idle') : 'idle';
+
+                cJob.remaining--;
+                if (cJob.remaining === 0) {
+                    cJob.done = true;
+                    if (queueSize > 0) queueSize--;       // dequeue
+                }
+
+            } else {
+                // No runnable task
+                cpuSt  = 'idle';
+                pRowSt = pJob ? (prodBlocked ? 'blocked' : 'idle') : 'idle';
+                cRowSt = cJob ? (consBlocked ? 'blocked' : 'idle') : 'idle';
+            }
+
+            cpuState.push(cpuSt);
+            prodRowState.push(pRowSt);
+            consRowState.push(cRowSt);
+            queueHistory.push(queueSize);
+        }
+
+        // ── Build draw-block arrays ────────────────────────────────────────
+        const prodRunBlocks  = stateToBlocks(prodRowState, s => s === 'run',     PROD_COLOR);
+        const prodBlkBlocks  = stateToBlocks(prodRowState, s => s === 'blocked', PROD_BLK_COLOR);
+        const consRunBlocks  = stateToBlocks(consRowState, s => s === 'run',     CONS_COLOR);
+        const consBlkBlocks  = stateToBlocks(consRowState, s => s === 'blocked', CONS_BLK_COLOR);
+        const cpuIdleBlocks  = stateToBlocks(cpuState,     s => s === 'idle',    CPU_IDLE_COLOR);
+
+        // ── Metrics ────────────────────────────────────────────────────────
+        const delivered    = consJobs.filter(j => j.done).length;
+        const prodBlkTicks = prodRowState.filter(s => s === 'blocked').length;
+        const consBlkTicks = consRowState.filter(s => s === 'blocked').length;
+        const idleTicks    = cpuState.filter(s => s === 'idle').length;
+        const queuePeak    = queueHistory.length ? Math.max(...queueHistory) : 0;
+        const overwrites   = overwriteTicks.length;
+
+        lastResult = {
+            prodRunBlocks, prodBlkBlocks,
+            consRunBlocks, consBlkBlocks,
+            cpuIdleBlocks, queueHistory,
+            overwriteTicks,
+            delivered, prodBlkTicks, consBlkTicks,
+            idleTicks, queuePeak, qCap, overwrites,
+            policy
+        };
+        updateMetrics();
+        redraw();
+    }
+
+    // ── Metrics ─────────────────────────────────────────────────────────────────
+    function updateMetrics() {
+        const { delivered, prodBlkTicks, consBlkTicks, idleTicks,
+                queuePeak, qCap, overwrites, policy } = lastResult;
+        const nomUtil = tasks.reduce((a, t) => a + t.exec / Math.max(1, t.period), 0) * 100;
+
+        const chip        = document.getElementById('chipSecond');
+        const chipLabel   = document.getElementById('chipSecondLabel');
+        const chipVal     = document.getElementById('metSecond');
+
+        if (policy === 'blocked') {
+            chip.className      = 'metric-chip chip-prodblk';
+            chipLabel.textContent = 'Producer Blocked';
+            chipVal.textContent   = `${prodBlkTicks}ms`;
+        } else {
+            chip.className      = 'metric-chip chip-overwrite';
+            chipLabel.textContent = 'Overwrites';
+            chipVal.textContent   = overwrites;
+        }
+
+        document.getElementById('metDelivered').textContent  = delivered;
+        document.getElementById('metConsBlk').textContent    = `${consBlkTicks}ms`;
+        document.getElementById('metQueuePeak').textContent  = `${queuePeak}/${qCap}`;
+        document.getElementById('metIdle').textContent       = `%${(idleTicks / totalTime * 100).toFixed(1)}`;
+        document.getElementById('metNominal').textContent    = `%${nomUtil.toFixed(1)}`;
+    }
+
+    // ── Canvas ──────────────────────────────────────────────────────────────────
+    function redraw() {
+        const wrapper = document.getElementById('canvasWrapper');
+        canvas.width  = Math.max(wrapper.clientWidth - 4, 600) * zoomFactor;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const L = 170, R = 55, T = 30, B = 50;
+        const baseH = (canvas.height - T - B) / 5;
+        const rowH  = [baseH, baseH, baseH, 2 * baseH];
+        const rowY  = [];
+        let cy = T;
+        rowH.forEach(h => { rowY.push(cy); cy += h; });
+        const bottomY = cy;
+
+        const scale    = (canvas.width - L - R) / totalTime;
+        const prodTask = tasks.find(t => t.id === 'prod');
+        const consTask = tasks.find(t => t.id === 'cons');
+        const qCap     = lastResult.qCap || 5;
+        const policy   = lastResult.policy || 'blocked';
+
+        // ── Period markers ────────────────────────────────────────────────────
+        ctx.save();
+        ctx.setLineDash([3, 4]);
+        ctx.strokeStyle = 'rgba(37,99,235,0.18)'; ctx.lineWidth = 1;
+        for (let t = prodTask.period; t < totalTime; t += prodTask.period) {
+            const x = L + t * scale;
+            ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, bottomY); ctx.stroke();
+        }
+        ctx.setLineDash([5, 3]);
+        ctx.strokeStyle = 'rgba(22,163,74,0.35)';
+        for (let t = consTask.period; t < totalTime; t += consTask.period) {
+            const x = L + t * scale;
+            ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, bottomY); ctx.stroke();
+        }
+        ctx.restore();
+
+        // ── Time grid ─────────────────────────────────────────────────────────
+        for (let t = 0; t <= totalTime; t += 100) {
+            const x = L + t * scale;
+            ctx.beginPath(); ctx.moveTo(x, T - 10); ctx.lineTo(x, bottomY);
+            ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1; ctx.stroke();
+            ctx.fillStyle = '#94a3b8'; ctx.font = '10px Arial'; ctx.textAlign = 'center';
+            ctx.fillText(t, x, bottomY + 14);
+        }
+
+        // ── Row separators ────────────────────────────────────────────────────
+        [T, ...rowY.slice(1), bottomY].forEach(y => {
+            ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(canvas.width - R, y);
+            ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 0.75; ctx.stroke();
+        });
+
+        // ── Row labels ────────────────────────────────────────────────────────
+        [
+            { text: `Producer  (P:${prodTask.priority})`, color: PROD_COLOR },
+            { text: `Consumer  (P:${consTask.priority})`, color: CONS_COLOR },
+            { text: 'CPU State',                          color: '#475569'  },
+            { text: `Message Queue\n(cap = ${qCap})`,    color: '#0369a1'  }
+        ].forEach((r, i) => {
+            const midY = rowY[i] + rowH[i] / 2;
+            ctx.fillStyle = r.color; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'right';
+            r.text.split('\n').forEach((line, li, arr) => {
+                ctx.fillText(line, L - 8, midY + (li - (arr.length - 1) / 2) * 14 + 4);
+            });
+        });
+
+        // ── Block renderer ────────────────────────────────────────────────────
+        function drawBlocks(blocks, ri, yFrac = 0.18, hFrac = 0.64, border = null) {
+            const rY = rowY[ri], rH = rowH[ri];
+            blocks.forEach(b => {
+                const x = L + b.start * scale;
+                const w = Math.max((b.end - b.start) * scale, 1);
+                const y = rY + rH * yFrac;
+                const h = rH * hFrac;
+                ctx.fillStyle = b.color;
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeStyle = border || 'rgba(0,0,0,0.09)';
+                ctx.lineWidth = 0.5;
+                ctx.strokeRect(x, y, w, h);
+            });
+        }
+
+        function labelBlocks(blocks, ri, label, textColor, minWidth = 36) {
+            const rH = rowH[ri];
+            blocks.forEach(b => {
+                const w = (b.end - b.start) * scale;
+                if (w < minWidth) return;
+                const x = L + b.start * scale + w / 2;
+                const y = rowY[ri] + rH * 0.57;
+                ctx.fillStyle = textColor;
+                ctx.font = 'bold 9px Arial'; ctx.textAlign = 'center';
+                ctx.fillText(label, x, y);
+            });
+        }
+
+        // ── Row 0: Producer ───────────────────────────────────────────────────
+        if (policy === 'blocked') {
+            drawBlocks(lastResult.prodBlkBlocks, 0, 0.18, 0.64, '#ea580c');
+            labelBlocks(lastResult.prodBlkBlocks, 0, 'BLOCKED', '#7c2d12');
+        }
+        drawBlocks(lastResult.prodRunBlocks, 0);
+
+        // ── Row 1: Consumer ───────────────────────────────────────────────────
+        drawBlocks(lastResult.consBlkBlocks, 1, 0.18, 0.64, '#7c3aed');
+        drawBlocks(lastResult.consRunBlocks, 1);
+        labelBlocks(lastResult.consBlkBlocks, 1, 'BLOCKED', '#4c1d95');
+
+        // ── Row 2: CPU State ──────────────────────────────────────────────────
+        drawBlocks(lastResult.cpuIdleBlocks.map(b => ({ ...b, color: CPU_IDLE_COLOR })), 2);
+        drawBlocks([
+            ...lastResult.prodRunBlocks.map(b => ({ ...b, color: CPU_ACTIVE_COLOR })),
+            ...lastResult.consRunBlocks.map(b => ({ ...b, color: CPU_ACTIVE_COLOR }))
+        ], 2);
+        labelBlocks(lastResult.cpuIdleBlocks.map(b => ({ ...b, color: CPU_IDLE_COLOR })), 2, 'IDLE', '#334155');
+
+        // ── Row 3: Queue Level chart ──────────────────────────────────────────
+        {
+            const qY = rowY[3], qH = rowH[3];
+            const pad = 8;
+            const chartY = qY + pad;
+            const chartH = qH - pad * 2;
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.fillRect(L, chartY, canvas.width - L - R, chartH);
+
+            for (let lv = 0; lv <= qCap; lv++) {
+                const y = chartY + chartH - (lv / qCap) * chartH;
+                ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(canvas.width - R, y);
+                if (lv === qCap) {
+                    ctx.setLineDash([4, 3]);
+                    ctx.strokeStyle = '#ef444488'; ctx.lineWidth = 1.5;
+                } else {
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 0.5;
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = lv === qCap ? '#dc2626' : '#94a3b8';
+                ctx.font      = `${lv === qCap ? 'bold ' : ''}9px Arial`;
+                ctx.textAlign = 'left';
+                ctx.fillText(lv, canvas.width - R + 4, y + 3);
+            }
+
+            // Fill bars
+            for (let t = 0; t < totalTime; t++) {
+                const q = lastResult.queueHistory[t];
+                if (q === 0) continue;
+                const frac = q / qCap;
+                const x    = L + t * scale;
+                const w    = Math.max(scale, 0.5);
+                const barH = frac * chartH;
+                const col  = frac >= 1   ? '#ef4444' :
+                             frac >= 0.5 ? '#f97316' : '#22c55e';
+                ctx.fillStyle = col + 'cc';
+                ctx.fillRect(x, chartY + chartH - barH, w, barH);
+            }
+
+            // Overwrite markers (ring buffer mode): downward red triangles on top edge
+            if (policy === 'overwrite') {
+                lastResult.overwriteTicks.forEach(t => {
+                    const x  = L + t * scale;
+                    const ty = chartY + 2;
+                    ctx.fillStyle = OW_COLOR;
+                    ctx.beginPath();
+                    ctx.moveTo(x, ty); ctx.lineTo(x + 5, ty - 7); ctx.lineTo(x - 5, ty - 7);
+                    ctx.closePath(); ctx.fill();
+
+                    // Vertical drop-line through the chart
+                    ctx.strokeStyle = OW_COLOR + '66'; ctx.lineWidth = 1.2;
+                    ctx.setLineDash([2, 2]);
+                    ctx.beginPath(); ctx.moveTo(x, ty); ctx.lineTo(x, chartY + chartH);
+                    ctx.stroke(); ctx.setLineDash([]);
+                });
+            }
+
+            ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+            ctx.strokeRect(L, chartY, canvas.width - L - R, chartH);
+
+            ctx.fillStyle = '#dc2626'; ctx.font = 'bold 9px Arial'; ctx.textAlign = 'right';
+            ctx.fillText('FULL', L - 4, chartY + 4);
+
+            // Overwrite event count label (ring buffer)
+            if (policy === 'overwrite' && lastResult.overwrites > 0) {
+                ctx.fillStyle = OW_COLOR;
+                ctx.font = 'bold 9px Arial'; ctx.textAlign = 'right';
+                ctx.fillText(`${lastResult.overwrites} overwrite(s)`, canvas.width - R - 4, chartY + 12);
+            }
+        }
+
+        // ── X-axis label ──────────────────────────────────────────────────────
+        ctx.fillStyle = '#64748b'; ctx.font = '10px Arial'; ctx.textAlign = 'center';
+        ctx.fillText('Time (ms)', L + (canvas.width - L - R) / 2, bottomY + 32);
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>

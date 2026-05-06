@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>RTOS Simulator - Aging Fix</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root{
+            --bg: #f8f9fa;
+            --card: #ffffff;
+            --border: #dee2e6;
+            --text: #212529;
+            --muted: #6c757d;
+            --primary: #0d6efd;
+            --primaryHover: #0b5ed7;
+            --shadow-sm: 0 0.125rem 0.25rem rgba(0,0,0,.075);
+            --shadow: 0 0.5rem 1rem rgba(0,0,0,.08);
+            --radius: 0.5rem;
+        }
+
+        * { box-sizing: border-box; }
+        html, body { height: 100%; }
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+            line-height: 1.4;
+            color: var(--text);
+            background: var(--bg);
+        }
+
+        .topbar{
+            position: sticky;
+            top: 0;
+            z-index: 10;
+            background: var(--card);
+            border-bottom: 1px solid var(--border);
+        }
+        .topbar-inner{
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 0.75rem 1rem;
+            display: flex;
+            align-items: baseline;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+        .topbar h1{
+            margin: 0;
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+        .topbar .subtitle{
+            color: var(--muted);
+            font-size: 0.9rem;
+            white-space: nowrap;
+        }
+
+        .app-shell{
+            max-width: 1280px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .layout{
+            display: grid;
+            grid-template-columns: 360px 1fr;
+            gap: 1rem;
+            align-items: start;
+        }
+
+        .card{
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow-sm);
+        }
+
+        .sidebar { padding: 1rem; }
+        .main-content { padding: 1rem; overflow-x: auto; box-shadow: var(--shadow); }
+
+        .sidebar h3 { margin: 0 0 0.75rem 0; font-size: 1rem; }
+        label { display: inline-block; margin-bottom: 0.25rem; color: var(--muted); font-size: 0.9rem; }
+
+        .meta-panel{
+            margin-top: 0.75rem;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            background: #fcfcfd;
+        }
+        .meta-row{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        .meta-row:first-child{ margin-top: 0; }
+        .meta-row .k{ color: var(--muted); font-size: 0.9rem; }
+        .meta-row .v{ font-weight: 600; font-variant-numeric: tabular-nums; }
+        input[type="range"]{ width: 100%; }
+
+        select{
+            width: 100%;
+            padding: 0.5rem 0.6rem;
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            background: #fff;
+        }
+
+        table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+        th, td { border: 1px solid var(--border); padding: 0.55rem 0.5rem; text-align: left; }
+        th { background: #f1f3f5; font-weight: 600; }
+
+        input[type="number"]{
+            width: 64px;
+            padding: 0.35rem 0.4rem;
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+        }
+
+        .sys-task { color: #b02a37; font-weight: 600; }
+
+        .btn{
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            background: var(--primary);
+            color: #fff;
+            border: 1px solid rgba(0,0,0,.05);
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-weight: 600;
+            margin-top: 0.5rem;
+            box-shadow: var(--shadow-sm);
+        }
+        .btn:hover { background: var(--primaryHover); }
+        .btn:active { transform: translateY(1px); }
+
+        @media (max-width: 980px){
+            .layout{ grid-template-columns: 1fr; }
+            .topbar .subtitle{ display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<header class="topbar">
+    <div class="topbar-inner">
+        <h1>Scheduling DEMO</h1>
+        <div class="subtitle">RTOS Simulator</div>
+    </div>
+</header>
+
+<main class="app-shell">
+    <div class="layout">
+        <div class="sidebar card">
+            <h3>Algoritma ve Görevler</h3>
+            <label for="algoSelect">Algoritma</label>
+            <select id="algoSelect" onchange="syncAndRun()">
+                <option value="prio">Preemptive Priority (No Aging)</option>
+                <option value="prio_aging">Preemptive Priority (Aging)</option>
+                <option value="rr">Round Robin</option>
+            </select>
+
+            <div class="meta-panel">
+                <div class="meta-row">
+                    <div class="k">Zaman Ekseni Zoom:</div>
+                    <div class="v"><span id="zoomLabel">1.00×</span></div>
+                </div>
+                <input id="zoomRange" type="range" min="1" max="5" step="0.25" value="1" oninput="setZoom(this.value)">
+                <div class="meta-row">
+                    <div class="k">Nominal CPU Yükü:</div>
+                    <div class="v"><span id="cpuLoadLabel">%0.0</span></div>
+                </div>
+            </div>
+
+            <table id="taskTable">
+                <thead>
+                    <tr>
+                        <th>✓</th>
+                        <th>Görev Adı</th>
+                        <th>Prio</th>
+                        <th>Periyot</th>
+                        <th>Base Exec</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Populated by JS -->
+                </tbody>
+            </table>
+            <button class="btn" onclick="syncAndRun(true)">Zamanlamaları Yeniden Oluştur</button>
+        </div>
+
+        <div class="main-content card" id="canvasWrapper">
+            <canvas id="timelineCanvas" height="350"></canvas>
+        </div>
+    </div>
+</main>
+
+<script>
+    let tasks = [
+        { id: 's1', name: 'Task H', type: 'sys', priority: 90, period: 100, exec: 55, color: '#c0392b', enabled: true },
+        { id: 's2', name: 'Task M', type: 'sys', priority: 60, period: 25, exec: 12, color: '#e74c3c', enabled: true },
+        { id: 's3', name: 'Task L', type: 'sys', priority: 40, period: 50, exec: 6, color: '#e67e22', enabled: true }
+    ];
+
+    const totalTime = 200; 
+    let zoomFactor = 1;
+    let canvas = document.getElementById('timelineCanvas');
+    let ctx = canvas.getContext('2d');
+    let wrapper = document.getElementById('canvasWrapper');
+    let generatedJobs = [];
+    let lastResult = { blocks: [], misses: [] };
+
+    function setZoom(v) {
+        const parsed = parseFloat(v);
+        zoomFactor = Number.isFinite(parsed) ? parsed : 1;
+        document.getElementById('zoomLabel').textContent = `${zoomFactor.toFixed(2)}×`;
+        redraw();
+    }
+
+    function updateNominalCpuLoad() {
+        const enabled = tasks.filter(t => t.enabled);
+        const util = enabled.reduce((acc, t) => {
+            const p = Math.max(1, Number(t.period) || 1);
+            const e = Math.max(0, Number(t.exec) || 0);
+            return acc + (e / p);
+        }, 0);
+        const pct = util * 100;
+        document.getElementById('cpuLoadLabel').textContent = `%${pct.toFixed(1)}`;
+    }
+
+    function init() {
+        const tbody = document.querySelector('#taskTable tbody');
+        tbody.innerHTML = '';
+        tasks.forEach(t => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><input type="checkbox" id="en_${t.id}" ${t.enabled ? 'checked' : ''} onchange="syncAndRun()"></td>
+                <td class="${t.type}-task">${t.name}</td>
+                <td><input type="number" id="prio_${t.id}" value="${t.priority}" oninput="syncAndRun()"></td>
+                <td><input type="number" id="period_${t.id}" value="${t.period}" oninput="syncAndRun()"></td>
+                <td><input type="number" id="exec_${t.id}" value="${t.exec}" oninput="syncAndRun()"></td>
+            `;
+            tbody.appendChild(tr);
+        });
+        setZoom(document.getElementById('zoomRange').value);
+        syncAndRun(true);
+    }
+
+    function syncAndRun(forceReroll = false) {
+        tasks.forEach(t => {
+            t.enabled = document.getElementById(`en_${t.id}`).checked;
+            t.priority = parseInt(document.getElementById(`prio_${t.id}`).value) || 0;
+            t.period = parseInt(document.getElementById(`period_${t.id}`).value) || 1;
+            t.exec = parseInt(document.getElementById(`exec_${t.id}`).value) || 0;
+        });
+        updateNominalCpuLoad();
+
+        // Like the reference DEMO: keep the timeline reactive to period/exec edits.
+        // Re-generate the job set on every sync (the button still calls with forceReroll=true,
+        // but we regenerate either way to avoid stale schedules).
+        generatedJobs = [];
+        tasks.filter(t => t.enabled).forEach(t => {
+            for(let start = 0; start < totalTime; start += t.period) {
+                generatedJobs.push({ taskId: t.id, priority: t.priority, release: start, deadline: start + t.period, remaining: t.exec });
+            }
+        });
+        runSimOnly();
+    }
+
+    function runSimOnly() {
+        const algo = document.getElementById('algoSelect').value;
+        let jobs = JSON.parse(JSON.stringify(generatedJobs));
+        
+        // Initialize dynamic priority
+        jobs.forEach(j => { j.dynamicPriority = j.priority; });
+
+        let blocks = [], misses = [], activeJob = null, prevJob = null, blockStart = 0;
+
+        for (let t = 0; t <= totalTime; t++) {
+            // Check missed deadlines
+            if (algo !== 'prio_aging') {
+                jobs.forEach(j => { if (t === j.deadline && j.remaining > 0) misses.push({ t, id: j.taskId }); });
+            }
+
+            prevJob = activeJob;
+            if (activeJob && activeJob.remaining <= 0) activeJob = null;
+
+            if (algo === 'prio') {
+                // Preemptive Priority (NO aging): always pick max base priority among ready.
+                let ready = jobs.filter(j => j.release <= t && j.remaining > 0);
+                ready.sort((a, b) => b.priority - a.priority);
+                activeJob = ready.length > 0 ? ready[0] : null;
+            } else if (algo === 'prio_aging') {
+                // Preemptive Priority (WITH aging): +1 per ms while waiting.
+                jobs.forEach(j => {
+                    if (j.release <= t && j.remaining > 0 && j !== activeJob) {
+                        j.dynamicPriority += 1;
+                    }
+                    if (j === activeJob) {
+                        j.dynamicPriority = tasks.find(x => x.id === j.taskId).priority;
+                    }
+                });
+
+                let ready = jobs.filter(j => j.release <= t && j.remaining > 0);
+                ready.sort((a, b) => b.dynamicPriority - a.dynamicPriority);
+                activeJob = ready.length > 0 ? ready[0] : null;
+            }
+
+            if (activeJob !== prevJob) {
+                if (t > 0 && prevJob) {
+                    let pCol = tasks.find(x => x.id === prevJob.taskId).color;
+                    blocks.push({ id: prevJob.taskId, start: blockStart, end: t, color: pCol });
+                }
+                blockStart = t;
+            }
+            if (activeJob) activeJob.remaining--;
+        }
+
+        if (blockStart < totalTime && activeJob) {
+            let fCol = tasks.find(x => x.id === activeJob.taskId).color;
+            blocks.push({ id: activeJob.taskId, start: blockStart, end: totalTime, color: fCol });
+        }
+
+        lastResult = { blocks, misses };
+        redraw();
+    }
+
+    function redraw() {
+        canvas.width = Math.max(wrapper.clientWidth, 800) * zoomFactor;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        const L = 140, R = 40, T = 40, B = 40;
+        const activeTasks = tasks.filter(t => t.enabled);
+        const rowH = (canvas.height - T - B) / (activeTasks.length + 1);
+        const scale = (canvas.width - L - R) / totalTime;
+
+        // Draw Time Grid
+        for (let t = 0; t <= totalTime; t += 25) {
+            let x = L + t * scale;
+            ctx.beginPath(); ctx.moveTo(x, T-10); ctx.lineTo(x, canvas.height-B);
+            ctx.strokeStyle = "#eee"; ctx.stroke();
+            ctx.fillStyle = "#999"; ctx.font = "10px Arial"; ctx.fillText(t, x-5, canvas.height-B+15);
+        }
+
+        // Draw Labels & Task Lines
+        activeTasks.forEach((t, i) => {
+            let y = T + i * rowH + rowH/2;
+            ctx.fillStyle = t.color; ctx.font = "bold 12px Arial"; ctx.textAlign = "right";
+            ctx.fillText(`${t.name} (P:${t.priority})`, L-10, y+5);
+            ctx.beginPath(); ctx.moveTo(L, T+(i+1)*rowH); ctx.lineTo(canvas.width-R, T+(i+1)*rowH); ctx.strokeStyle = "#eee"; ctx.stroke();
+        });
+
+        // Draw Execution Blocks
+        lastResult.blocks.forEach(b => {
+            ctx.fillStyle = b.color;
+            let x = L + b.start * scale;
+            let idx = activeTasks.findIndex(t => t.id === b.id);
+            let y = T + idx * rowH + rowH*0.2;
+            ctx.fillRect(x, y, (b.end - b.start) * scale, rowH*0.6);
+        });
+
+        // Draw Misses (Red X)
+        lastResult.misses.forEach(m => {
+            let x = L + m.t * scale;
+            let idx = activeTasks.findIndex(t => t.id === m.id);
+            let y = T + idx * rowH + rowH*0.5;
+            ctx.fillStyle = "red"; ctx.font = "bold 16px Arial"; ctx.textAlign = "center";
+            ctx.fillText("✘", x, y);
+        });
+    }
+
+    window.onload = init;
+</script>
+</body>
+</html>

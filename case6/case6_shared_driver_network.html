@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Case 6 - Shared Ethernet Driver RTOS</title>
+<style>
+body{font-family:Segoe UI,system-ui,sans-serif;margin:0;background:#f5f7fb;color:#263238}header{background:#0d47a1;color:#fff;padding:18px 24px}main{display:grid;grid-template-columns:420px 1fr;gap:16px;padding:16px}.panel{background:#fff;border-radius:10px;box-shadow:0 3px 8px #0002;padding:14px}h2{margin-top:0}.row{display:grid;grid-template-columns:1fr 110px;gap:8px;align-items:center;margin:8px 0}input,select,button{padding:8px;border:1px solid #ccd;border-radius:6px}button{background:#0d47a1;color:white;font-weight:700;cursor:pointer}.btn2{background:#455a64}.canvasWrap{overflow:auto;border:1px solid #ddd;border-radius:8px;background:white}.legend span{display:inline-block;margin:4px 10px 4px 0}.dot{width:12px;height:12px;border-radius:3px;display:inline-block;margin-right:4px;vertical-align:-2px}.warn{background:#fff8e1;border-left:5px solid #ffb300;padding:10px;border-radius:6px;font-size:.9rem}.stat{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.card{background:#e3f2fd;border-radius:8px;padding:8px;font-size:.86rem;min-height:38px}#log{height:175px;overflow:auto;background:#101820;color:#d6f5d6;padding:8px;border-radius:8px;font-family:ui-monospace,monospace;font-size:12px}details{font-size:.9rem}li{margin-bottom:6px}.small{font-size:.85rem;color:#546e7a}.bad{color:#c62828;font-weight:bold}.good{color:#2e7d32;font-weight:bold}</style>
+</head>
+<body>
+<header>
+  <h1>Case Study 6 - Shared Ethernet Driver + Network Stack</h1>
+  <div>Case 5 system extended with Network HW, Ethernet Driver, TX Queue and RTOS Network Stack Task.</div>
+</header>
+<main>
+<section class="panel">
+<h2>Controls</h2>
+<div class="row"><label>Scenario</label><select id="scenario" onchange="applyScenario();run()"><option value="success">Successful orchestration</option><option value="fail_low_stack">Unsuccessful: network stack priority too low</option><option value="fail_load">Unsuccessful: heavy network load</option></select></div>
+<div class="row"><label>Simulation duration (ms)</label><input id="duration" type="number" value="700" min="500"></div>
+<div class="row"><label>Network stack priority</label><input id="netPrio" type="number" value="75"></div>
+<div class="row"><label>ISR_Radar priority</label><input id="isrPrio" type="number" value="95"></div>
+<div class="row"><label>Task_Compute priority</label><input id="compPrio" type="number" value="80"></div>
+<div class="row"><label>Task_Log priority</label><input id="logPrio" type="number" value="20"></div>
+<div class="row"><label>TX queue capacity</label><input id="txCap" type="number" value="6"></div>
+<div class="row"><label>Radar network period</label><input id="radarNet" type="number" value="20"></div>
+<div class="row"><label>Log network period</label><input id="logNet" type="number" value="50"></div>
+<div class="row"><label>Network stack exec (ms)</label><input id="stackExec" type="number" value="4"></div>
+<div class="row"><label>Driver/HW TX time (ms)</label><input id="drvExec" type="number" value="6"></div>
+<button onclick="run()">Run Simulation</button>
+<button class="btn2" onclick="downloadCanvas()" style="margin-top:8px">Download Graph PNG</button>
+<div class="warn" style="margin-top:12px">Change Network Stack priority above/below the worker tasks. Increase message load to show which producer's packets are dropped when the shared TX queue becomes full.</div>
+<h3>Summary</h3>
+<div class="stat"><div class="card" id="s1"></div><div class="card" id="s2"></div><div class="card" id="s3"></div><div class="card" id="s4"></div></div>
+<h3>Event Log</h3><div id="log"></div>
+<details open><summary>Network terminology</summary><ul>
+<li><b>Network HW / NIC:</b> Ethernet controller that physically transmits packets.</li>
+<li><b>Ethernet Driver:</b> Low-level code between RTOS and hardware. It starts TX operations and manages hardware availability.</li>
+<li><b>Network Stack Task:</b> RTOS task that removes packets from TX Queue, prepares protocol work and passes packets to the driver.</li>
+<li><b>TX Queue:</b> Shared transmit queue used by Radar and Log producers. If it is full, newly generated packets are dropped.</li>
+<li><b>Shared Driver:</b> One Ethernet driver is used by multiple producers, so scheduling and priority choices affect all traffic.</li>
+<li><b>Drop:</b> Packet loss caused by insufficient queue capacity or insufficient service rate.</li>
+</ul></details>
+</section>
+<section class="panel"><div class="legend">
+<span><i class="dot" style="background:#e53935"></i>ISR_Radar</span><span><i class="dot" style="background:#43a047"></i>Task_Compute</span><span><i class="dot" style="background:#8e24aa"></i>Task_Log</span><span><i class="dot" style="background:#fb8c00"></i>Network_Stack</span><span><i class="dot" style="background:#3949ab"></i>Ethernet_Driver/HW</span><span><i class="dot" style="background:#1e88e5"></i>TX Queue</span></div><div class="canvasWrap"><canvas id="cv" width="1400" height="700"></canvas></div></section>
+</main>
+<script>
+const rows=[['ISR_Radar','#e53935'],['Task_Compute','#43a047'],['Task_Log','#8e24aa'],['Network_Stack','#fb8c00'],['Ethernet_Driver_HW','#3949ab'],['TX_Queue_Level','#1e88e5'],['IDLE','#eee']];
+let res={blocks:[],q:[],dropsRadar:0,dropsLog:0,sentRadar:0,sentLog:0,genRadar:0,genLog:0,log:[],maxQ:0};
+function n(id){return Number(document.getElementById(id).value)}
+function set(id,val){document.getElementById(id).value=val}
+function scenario(){return document.getElementById('scenario').value}
+function eventLog(m){res.log.push(m)}
+function addBlock(id,s,e,note=''){if(e>s)res.blocks.push({id,s,e,note,color:(rows.find(r=>r[0]===id)||[])[1]||'#999'})}
+function applyScenario(){
+  const sc=scenario();
+  if(sc==='success'){set('duration',700);set('netPrio',75);set('txCap',6);set('radarNet',20);set('logNet',50);set('stackExec',4);set('drvExec',6);}
+  if(sc==='fail_low_stack'){set('duration',700);set('netPrio',10);set('txCap',6);set('radarNet',20);set('logNet',35);set('stackExec',5);set('drvExec',8);}
+  if(sc==='fail_load'){set('duration',700);set('netPrio',75);set('txCap',4);set('radarNet',10);set('logNet',20);set('stackExec',5);set('drvExec',9);}
+}
+function run(){
+  res={blocks:[],q:[],dropsRadar:0,dropsLog:0,sentRadar:0,sentLog:0,genRadar:0,genLog:0,log:[],maxQ:0};
+  const dur=n('duration'),cap=n('txCap'),rnet=n('radarNet'),lnet=n('logNet'),drv=n('drvExec'),stackExec=n('stackExec');
+  const netPrio=n('netPrio'),isrPrio=n('isrPrio'),compPrio=n('compPrio'),logPrio=n('logPrio');
+  let tx=[],pending=[],current=null,lastId=null,blockStart=0,driverFree=0,netJobWaiting=false;
+  function enqueue(src,t){
+    if(tx.length<cap){tx.push({src,t});src==='Radar'?res.genRadar++:res.genLog++;eventLog(`[${t}ms] ${src} packet queued (${tx.length}/${cap})`)}
+    else{src==='Radar'?res.dropsRadar++:res.dropsLog++;eventLog(`[${t}ms] DROP ${src}: TX queue full (${tx.length}/${cap})`)}
+    res.maxQ=Math.max(res.maxQ,tx.length);
+  }
+  function makeJob(id,prio,exec,onStart,onFinish,note){return{id,prio,remaining:exec,total:exec,onStart,onFinish,started:false,note:note||`P:${prio}`}}
+  function hasNetJob(){return (current&&current.id==='Network_Stack')||pending.some(j=>j.id==='Network_Stack')}
+  for(let t=0;t<dur;t++){
+    // Producers: exactly one Radar network producer and one Log network producer.
+    if(t%rnet===0){
+      pending.push(makeJob('ISR_Radar',isrPrio,1,()=>enqueue('Radar',t),()=>{pending.push(makeJob('Task_Compute',compPrio,7,null,null,`process radar`));},`Radar TX req`));
+    }
+    if(t%lnet===5){
+      pending.push(makeJob('Task_Log',logPrio,8,()=>enqueue('Log',t),null,`Log TX req`));
+    }
+    // Network stack becomes ready when TX queue has packets and driver is free.
+    if(tx.length>0 && t>=driverFree && !hasNetJob()){
+      pending.push(makeJob('Network_Stack',netPrio,stackExec,null,()=>{
+        const p=tx.shift();
+        const ds=t; // driver starts after stack job completes at current t
+        addBlock('Ethernet_Driver_HW',ds,ds+drv,`${p.src} TX`);
+        driverFree=ds+drv;
+        p.src==='Radar'?res.sentRadar++:res.sentLog++;
+        eventLog(`[${t}ms] Network_Stack passed ${p.src} packet to Ethernet driver`);
+      },`drain TX`));
+    }
+    // Preemptive priority scheduler at 1ms resolution.
+    if(current) pending.push(current);
+    pending.sort((a,b)=>b.prio-a.prio || a.remaining-b.remaining);
+    current=pending.shift()||null;
+    const id=current?current.id:'IDLE';
+    if(id!==lastId){ if(t>blockStart)addBlock(lastId||'IDLE',blockStart,t); blockStart=t; lastId=id; }
+    if(current){
+      if(!current.started){current.started=true;if(current.onStart)current.onStart();}
+      current.remaining--;
+      if(current.remaining<=0){ if(current.onFinish)current.onFinish(); current=null; }
+    }
+    res.q.push({t,len:tx.length});
+  }
+  if(dur>blockStart)addBlock(lastId||'IDLE',blockStart,dur);
+  draw(dur,cap);
+  const totalDrops=res.dropsRadar+res.dropsLog;
+  document.getElementById('log').innerHTML=res.log.slice(-90).join('<br>');
+  document.getElementById('s1').innerHTML=`Radar generated / sent / drop<br><b>${res.genRadar} / ${res.sentRadar} / <span class="${res.dropsRadar?'bad':'good'}">${res.dropsRadar}</span></b>`;
+  document.getElementById('s2').innerHTML=`Log generated / sent / drop<br><b>${res.genLog} / ${res.sentLog} / <span class="${res.dropsLog?'bad':'good'}">${res.dropsLog}</span></b>`;
+  document.getElementById('s3').innerHTML=`Network priority / max queue<br><b>${netPrio} / ${res.maxQ}-${cap}</b>`;
+  document.getElementById('s4').innerHTML=`Result<br><b class="${totalDrops?'bad':'good'}">${totalDrops?totalDrops+' drops':'No drops'}</b>`;
+}
+function draw(dur,cap){
+  const c=document.getElementById('cv'),ctx=c.getContext('2d');c.width=Math.max(1400,dur*2.15);ctx.clearRect(0,0,c.width,c.height);
+  const L=175,T=45,R=30,rowH=84,scale=(c.width-L-R)/dur;
+  ctx.font='12px Segoe UI';
+  function y(id){return T+rows.findIndex(r=>r[0]===id)*rowH+30}
+  rows.forEach((r,i)=>{const yy=T+i*rowH+30;ctx.fillStyle=r[1];ctx.textAlign='right';ctx.fillText(r[0],L-10,yy+4);ctx.strokeStyle='#eee';ctx.beginPath();ctx.moveTo(L,yy+32);ctx.lineTo(c.width-R,yy+32);ctx.stroke();});
+  for(let t=0;t<=dur;t+=20){const x=L+t*scale;ctx.strokeStyle=t%100?'#eee':'#bbb';ctx.beginPath();ctx.moveTo(x,25);ctx.lineTo(x,625);ctx.stroke();if(t%100===0){ctx.fillStyle='#777';ctx.textAlign='center';ctx.fillText(t+'ms',x,655)}}
+  res.blocks.forEach(b=>{const x=L+b.s*scale,w=Math.max(2,(b.e-b.s)*scale),yy=y(b.id)-20;ctx.fillStyle=b.color;ctx.fillRect(x,yy,w,38);ctx.strokeStyle='#0002';ctx.strokeRect(x,yy,w,38);if(w>38&&b.id!=='IDLE'){ctx.fillStyle='white';ctx.textAlign='left';ctx.fillText(b.note,x+3,yy+23)}});
+  // Queue capacity guide lines
+  for(let k=0;k<=cap;k++){let yy=y('TX_Queue_Level')+30-k*9;ctx.strokeStyle=k===cap?'#e57373':'#e3f2fd';ctx.beginPath();ctx.moveTo(L,yy);ctx.lineTo(c.width-R,yy);ctx.stroke();if(k===cap){ctx.fillStyle='#c62828';ctx.textAlign='left';ctx.fillText('capacity',c.width-R-60,yy-3)}}
+  ctx.strokeStyle='#1e88e5';ctx.lineWidth=3;ctx.beginPath();res.q.forEach((q,i)=>{const x=L+q.t*scale,yy=y('TX_Queue_Level')+30-q.len*9;if(i===0)ctx.moveTo(x,yy);else ctx.lineTo(x,yy)});ctx.stroke();ctx.lineWidth=1;
+  ctx.fillStyle='#111';ctx.textAlign='left';ctx.fillText('Successful case: Network_Stack drains TX Queue before capacity is reached. Failure: queue fills when stack priority/service rate is insufficient.',L,20);
+}
+function downloadCanvas(){const a=document.createElement('a');a.download='case6_network_graph.png';a.href=document.getElementById('cv').toDataURL();a.click()}
+window.onload=()=>{applyScenario();run()};
+</script>
+</body>
+</html>
